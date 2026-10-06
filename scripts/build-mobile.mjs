@@ -1,0 +1,20 @@
+import { build } from 'esbuild';
+import { mkdir, readFile, writeFile, copyFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
+import { validateServerUrl } from '../mobile/client.mjs';
+
+const root = fileURLToPath(new URL('../', import.meta.url));
+const outdir = resolve(root, 'dist-mobile');
+const config = JSON.parse(await readFile(resolve(root, 'mobile/config.json'), 'utf8'));
+validateServerUrl(config.apiBase);
+await mkdir(outdir, { recursive: true });
+await build({ entryPoints: [resolve(root, 'mobile/entry.js')], outfile: resolve(outdir, 'app.js'), bundle: true, format: 'iife', platform: 'browser', target: ['chrome100'], minify: true, legalComments: 'eof' });
+let html = await readFile(resolve(root, 'public/index.html'), 'utf8');
+html = html.replace('type="module" src="/app.js"', 'defer src="./app.js"').replace('href="/styles.css"', 'href="./styles.css"').replace('href="/favicon.svg"', 'href="./favicon.svg"');
+await writeFile(resolve(outdir, 'index.html'), html);
+let css = await readFile(resolve(root, 'public/styles.css'), 'utf8');
+css = css.replace(/^@import url\([^\n]+\);\r?\n/, '');
+await writeFile(resolve(outdir, 'styles.css'), css);
+await copyFile(resolve(root, 'public/favicon.svg'), resolve(outdir, 'favicon.svg'));
+console.log(`Mobile assets built: ${outdir}\nMode: ${config.apiBase ? 'HTTPS server' : 'offline sample (no PC server required)'}`);

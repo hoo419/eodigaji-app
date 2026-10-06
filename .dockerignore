@@ -1,0 +1,6 @@
+**
+!server.mjs
+!lib/
+!lib/**
+!public/
+!public/**

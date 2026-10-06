@@ -1,0 +1,16 @@
+node_modules/
+.env
+.env.*
+!.env.example
+artifacts/
+*.log
+dist-mobile/
+.tooling/
+android/.gradle/
+android/local.properties
+android/**/build/
+*.jks
+*.keystore
+
+# Local handoff exports contain conversation/account configuration.
+인수인계/

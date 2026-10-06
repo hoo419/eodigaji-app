@@ -1,0 +1,12 @@
+{
+  "appId": "com.eodigaji.beta",
+  "appName": "어디가지 베타",
+  "webDir": "dist-mobile",
+  "backgroundColor": "#f6f7f9",
+  "android": {
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
