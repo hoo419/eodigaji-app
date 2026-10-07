@@ -46,7 +46,7 @@ function render() {
     <nav class="nav">${[['explore', 'compass', '탐색'], ['saved', 'heart', '저장한 코스'], ['profile', 'user', '마이페이지']].map(([id, i, label]) => `<button data-action="nav" data-tab="${id}" class="${state.tab === id ? 'active' : ''}" ${state.tab === id ? 'aria-current="page"' : ''}>${icon(i)}<span class="nav-label">${label}</span>${id === 'saved' && state.saved.length ? `<span class="count">${state.saved.length}</span>` : ''}</button>`).join('')}</nav>
     <div class="side-note">${icon('spark')}<br><strong>계획은 가볍게,<br>우리의 하루는 특별하게.</strong><p>좋아하는 것들로 채우는<br>둘만의 새로운 하루</p></div>
     <button class="side-profile" data-action="nav" data-tab="profile"><span class="avatar">${esc(name.slice(0, 1))}</span><div><strong>${esc(name)}님</strong><small>${state.profile ? '나만의 취향으로 탐색 중' : '게스트로 둘러보는 중'}</small></div></button></aside>
-    <div class="main-wrap"><header class="topbar"><div class="crumb">우리의 다음 목적지 <strong>/ &nbsp; ${state.tab === 'explore' ? '탐색' : state.tab === 'saved' ? '저장한 코스' : '마이페이지'}</strong></div><div class="mobile-brand">${brand}</div><div class="top-actions"><span class="small muted"><span class="status-dot"></span>새로운 하루의 시작</span>${btn('about', '샘플 체험', '', 'ghost')}${state.user ? btn('logout', '로그아웃', '', 'logout-top') : ''}${btn(state.profile ? 'edit-profile' : 'onboard', state.profile ? `${esc(name)}님` : '로그인 · 회원가입', 'user', 'outline')}</div></header>
+    <div class="main-wrap"><header class="topbar"><div class="crumb">우리의 다음 목적지 <strong>/ &nbsp; ${state.tab === 'explore' ? '탐색' : state.tab === 'saved' ? '저장한 코스' : '마이페이지'}</strong></div><div class="mobile-brand">${brand}</div><div class="top-actions"><span class="small muted"><span class="status-dot"></span>새로운 하루의 시작</span>${btn('about', '샘플 체험', '', 'ghost')}${state.user ? btn('logout', '로그아웃', '', 'logout-top') : state.config.auth && state.profile ? btn('auth-login', '로그인', '', 'outline') : ''}${btn(state.profile ? 'edit-profile' : 'onboard', state.profile ? `${esc(name)}님` : '로그인 · 회원가입', 'user', 'outline')}</div></header>
     <main id="main" class="content">${state.tab === 'explore' ? explore() : state.tab === 'saved' ? savedPage() : profilePage()}</main></div></div>`;
   if (state.view === 'chat') { const messages = $('.messages'); if (messages) messages.scrollTop = messages.scrollHeight; }
   if (state.tab === 'explore') {
@@ -227,7 +227,13 @@ document.addEventListener('click', async e => {
   if (action === 'onboard') { draftProfile = {}; if (state.config.auth) authDialog('login'); else onboard(0); }
   if (action === 'connections') connectionsDialog();
   if (action === 'auth-login' || action === 'auth-signup') authDialog(action === 'auth-login' ? 'login' : 'signup');
-  if (action === 'logout') { try { await api('/api/auth/logout', {}); } catch (e) { toast(e.message); } state.user = null; state.profile = stored('profile', null); state.saved = stored('saved', []); closeDialog(); render(); }
+  if (action === 'logout') {
+    try { await api('/api/auth/logout', {}); } catch (e) { toast(e.message); return; }
+    // 클라우드 데이터는 보존하고 화면의 회원 정보만 비웁니다. 과거 체험 프로필을 복원하지 않습니다.
+    state.user = null; state.profile = null; state.saved = [];
+    draftProfile = {}; draftCourse = null;
+    closeDialog(); render();
+  }
   if (action === 'signup') onboard(1);
   if (action === 'edit-profile') onboard(1, true);
   if (action === 'demo-login') { if (state.profile) { closeDialog(); state.tab = 'profile'; render(); } else { draftProfile = { name: '여행자' }; onboard(1); } }
@@ -263,7 +269,12 @@ async function init() {
   const returnedFromEmail = confirmation.has('access_token') || confirmation.has('error') || confirmation.has('error_code');
   if (returnedFromEmail) window.history.replaceState(null, '', window.location.pathname + window.location.search);
   try { state.config = await api('/api/config'); [state.places, state.course] = await Promise.all([api('/api/places'), api('/api/plan', state.conditions)]); state.conditions = state.course.conditions;
-    if (state.config.auth) { const result = await api('/api/auth/user'); state.user = result.user; if (state.user) await loadAccount(); }
+    if (state.config.auth) {
+      // 온라인 계정 모드에서는 브라우저의 체험 데이터를 회원 정보처럼 표시하지 않습니다.
+      state.profile = null; state.saved = [];
+      const result = await api('/api/auth/user'); state.user = result.user;
+      if (state.user) await loadAccount();
+    }
     render();
     if (returnedFromEmail) {
       authDialog('login');
