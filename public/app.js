@@ -35,7 +35,7 @@ async function api(path, body) {
   finally { clearTimeout(timeout); }
 }
 const brand = '<span class="brand">어디가지<span class="beta">베타</span></span>';
-const photo = (p, cls = 'photo') => p.photo ? `<img class="${cls}" src="https://images.unsplash.com/${esc(p.photo)}?auto=format&fit=crop&w=900&q=80" alt="${esc(p.category)} 분위기 참고 사진" loading="lazy" referrerpolicy="no-referrer">` : `<span class="${cls} photo-placeholder" role="img" aria-label="${esc(p.name)} 사진 미제공">${icon(p.category === '카페' ? 'coffee' : 'pin')}<small>장소 사진 미제공</small></span>`;
+const photo = (p, cls = 'photo') => p.photo ? `<img data-place-photo class="${cls}" src="https://images.unsplash.com/${esc(p.photo)}?auto=format&fit=crop&w=900&q=80" alt="${esc(p.category)} 분위기 참고 사진" loading="lazy" referrerpolicy="no-referrer">` : `<span class="${cls} photo-placeholder" role="img" aria-label="${esc(p.name)} 사진 미제공">${icon(p.category === '카페' ? 'coffee' : 'pin')}<small>장소 사진 미제공</small></span>`;
 const btn = (action, text, ic = '', cls = '', extra = '') => `<button type="button" class="btn ${cls}" data-action="${action}" ${extra}>${ic ? icon(ic) : ''}${text}</button>`;
 const actionIcon = (action, ic, label, extra = '') => `<button type="button" class="icon-btn" data-action="${action}" aria-label="${esc(label)}" ${extra}>${icon(ic)}</button>`;
 const isSaved = course => state.saved.some(p => p.id === course.id);
@@ -46,7 +46,7 @@ function render() {
     <nav class="nav">${[['explore', 'compass', '탐색'], ['saved', 'heart', '저장한 코스'], ['profile', 'user', '마이페이지']].map(([id, i, label]) => `<button data-action="nav" data-tab="${id}" class="${state.tab === id ? 'active' : ''}" ${state.tab === id ? 'aria-current="page"' : ''}>${icon(i)}<span class="nav-label">${label}</span>${id === 'saved' && state.saved.length ? `<span class="count">${state.saved.length}</span>` : ''}</button>`).join('')}</nav>
     <div class="side-note">${icon('spark')}<br><strong>계획은 가볍게,<br>우리의 하루는 특별하게.</strong><p>좋아하는 것들로 채우는<br>둘만의 새로운 하루</p></div>
     <button class="side-profile" data-action="nav" data-tab="profile"><span class="avatar">${esc(name.slice(0, 1))}</span><div><strong>${esc(name)}님</strong><small>${state.profile ? '나만의 취향으로 탐색 중' : '게스트로 둘러보는 중'}</small></div></button></aside>
-    <div class="main-wrap"><header class="topbar"><div class="crumb">우리의 다음 목적지 <strong>/ &nbsp; ${state.tab === 'explore' ? '탐색' : state.tab === 'saved' ? '저장한 코스' : '마이페이지'}</strong></div><div class="mobile-brand">${brand}</div><div class="top-actions"><span class="small muted"><span class="status-dot"></span>새로운 하루의 시작</span>${btn('about', '샘플 체험', '', 'ghost')}${state.user ? btn('logout', '로그아웃', '', 'logout-top') : state.config.auth && state.profile ? btn('auth-login', '로그인', '', 'outline') : ''}${btn(state.profile ? 'edit-profile' : 'onboard', state.profile ? `${esc(name)}님` : '로그인 · 회원가입', 'user', 'outline')}</div></header>
+    <div class="main-wrap"><header class="topbar"><div class="crumb">우리의 다음 목적지 <strong>/ &nbsp; ${state.tab === 'explore' ? '탐색' : state.tab === 'saved' ? '저장한 코스' : '마이페이지'}</strong></div><div class="mobile-brand">${brand}</div><div class="top-actions"><span class="small muted"><span class="status-dot"></span>새로운 하루의 시작</span>${!window.EodigajiNative ? btn('install-app', '앱 설치', '', 'ghost') : ''}${btn('about', '샘플 체험', '', 'ghost')}${state.user ? btn('logout', '로그아웃', '', 'logout-top') : state.config.auth && state.profile ? btn('auth-login', '로그인', '', 'outline') : ''}${btn(state.profile ? 'edit-profile' : 'onboard', state.profile ? `${esc(name)}님` : '로그인 · 회원가입', 'user', 'outline')}</div></header>
     <main id="main" class="content">${state.tab === 'explore' ? explore() : state.tab === 'saved' ? savedPage() : profilePage()}</main></div></div>`;
   if (state.view === 'chat') { const messages = $('.messages'); if (messages) messages.scrollTop = messages.scrollHeight; }
   if (state.tab === 'explore') {
@@ -163,9 +163,61 @@ function onboard(step = 0, editing = false) {
   } else if (step === 1) {
   const p = editing ? state.profile || {} : draftProfile;
     openDialog(editing ? '나의 취향 수정' : '어떤 순간을 좋아하나요?', `${progress}<p>이름 외에는 모두 선택 사항이에요.<br>MBTI보다 직접 고른 취향을 먼저 참고해요.</p><form id="profile-form"><div class="form-grid"><label class="field wide">이름 또는 별명<input name="name" placeholder="어떻게 불러 드릴까요?" maxlength="20" value="${esc(p.name || '')}" required autocomplete="nickname"></label>${selectField('gender', '성별 (선택)', [['', '선택하지 않음'], '여성', '남성', '직접 규정하지 않음'], p.gender)}<label class="field">나이 (선택)<input name="age" type="number" min="14" max="120" value="${esc(p.age || '')}" placeholder="만 나이"></label>${selectField('personality', '성격 (선택)', [['', '선택하지 않음'], '차분한 편', '활발한 편', '상황에 따라 달라요'], p.personality)}${selectField('mbti', 'MBTI (선택)', [['', '모르겠어요'], ...['I', 'E'].flatMap(a => ['N', 'S'].flatMap(b => ['F', 'T'].flatMap(c => ['P', 'J'].map(d => a + b + c + d))))], p.mbti)}<fieldset class="field wide" style="border:0;padding:0;margin:0"><legend style="margin-bottom:10px">좋아하는 활동 (여러 개 선택)</legend><div class="choices">${['카페', '맛집', '전시', '산책', '사진', '드라이브'].map(x => `<label class="choice"><input type="checkbox" name="interests" value="${x}" ${p.interests?.includes(x) ? 'checked' : ''}>${x}</label>`).join('')}</div></fieldset></div><p class="form-note">프로필은 이 브라우저에만 저장돼요. 이번 일정에서 직접 선택한 조건을 우선합니다.</p><p id="form-error" class="form-error" role="alert"></p><input type="hidden" name="editing" value="${editing}"></form>`, `<button class="btn primary" type="submit" form="profile-form">${editing ? '프로필 저장' : '다음으로'}${icon('arrow')}</button>`);
+    setupProfileSteps(editing);
   } else {
     openDialog('우리, 어디에서 만날까요?', `${progress}<div class="welcome-visual">${icon('pin')}</div><h3 class="intro-title">가까운 곳부터<br>새롭게 발견해요.</h3><p>위치 권한은 선택 사항이에요. 허용하지 않아도 원하는 지역을 직접 골라 모든 체험 기능을 이용할 수 있어요.</p><div class="form-note">위치 권한 흐름만 체험하며, 좌표는 서버로 전송하거나 저장하지 않습니다. 코스는 선택한 샘플 지역을 기준으로 표시됩니다.</div><p id="location-status" class="form-error" role="status"></p>`, `${btn('manual-location', '지역 직접 선택', '', 'outline')}${btn('allow-location', '위치 권한 설정', 'target', 'primary')}`);
   }
+}
+// 같은 폼을 유지해 이전/다음 이동 시 입력한 값이 사라지지 않게 합니다.
+function setupProfileSteps(editing) {
+  const form = $('#profile-form');
+  const grid = form.querySelector('.form-grid');
+  grid.className = 'profile-steps';
+  const fields = [...grid.children];
+  fields.forEach((field, index) => {
+    field.classList.add('profile-step');
+    field.hidden = index !== 0;
+    field.inert = index !== 0;
+  });
+  form.dataset.step = '0';
+  form.dataset.editing = String(editing);
+  form.noValidate = true;
+  const mark = dialog.querySelector('.onboarding-mark');
+  mark.outerHTML = '<p id="profile-progress" class="profile-progress" aria-live="polite">1 / 6 · 이름</p><div class="profile-progress-track"><span id="profile-progress-fill" style="width:16.67%"></span></div>';
+  const note = form.querySelector('.form-note');
+  note.textContent = state.user ? '마지막 단계에서 저장하면 계정에 반영돼요.' : '마지막 단계까지 입력한 뒤 저장해요.';
+  const next = dialog.querySelector('[type="submit"]');
+  next.textContent = '다음';
+  next.insertAdjacentHTML('beforebegin', '<button type="button" class="btn outline" id="profile-previous" hidden>이전</button>');
+  $('#profile-previous').addEventListener('click', () => showProfileStep(form, Number(form.dataset.step) - 1));
+  fields[0].querySelector('input, select')?.focus();
+}
+function showProfileStep(form, step) {
+  const fields = [...form.querySelector('.profile-steps').children];
+  if (step < 0 || step >= fields.length) return;
+  const backwards = step < Number(form.dataset.step);
+  form.dataset.step = String(step);
+  fields.forEach((field, index) => {
+    field.hidden = index !== step;
+    field.inert = index !== step;
+    field.classList.toggle('slide-back', backwards);
+  });
+  $('#profile-progress').textContent = `${step + 1} / ${fields.length} · ${['이름', '성별', '나이', '성격', 'MBTI', '관심사'][step]}`;
+  $('#profile-progress-fill').style.width = `${(step + 1) / fields.length * 100}%`;
+  $('#profile-previous').hidden = step === 0;
+  dialog.querySelector('[type="submit"]').textContent = step === fields.length - 1 ? (form.dataset.editing === 'true' ? '저장하기' : '위치 설정으로') : '다음';
+  $('#form-error').textContent = '';
+  fields[step].querySelector('input, select')?.focus({ preventScroll: true });
+}
+function advanceProfileStep(form) {
+  const fields = [...form.querySelector('.profile-steps').children];
+  const step = Number(form.dataset.step);
+  for (const input of fields[step].querySelectorAll('input, select')) {
+    if (input.name === 'name') input.value = input.value.trim();
+    if (!input.reportValidity()) return false;
+  }
+  if (step < fields.length - 1) { showProfileStep(form, step + 1); return false; }
+  return true;
 }
 async function requestLocation() {
   if (window.EodigajiNative) {
@@ -250,6 +302,7 @@ document.addEventListener('submit', async e => {
   e.preventDefault();
   if (e.target.id === 'chat-form') return sendChat(new FormData(e.target).get('message'));
   if (e.target.id === 'profile-form') {
+    if (!advanceProfileStep(e.target)) return;
     const data = new FormData(e.target); const name = data.get('name').trim();
     if (!name) { $('#form-error').textContent = '이름 또는 별명을 입력해 주세요.'; return; }
     draftProfile = { name, age: data.get('age'), gender: data.get('gender'), personality: data.get('personality'), mbti: data.get('mbti'), interests: data.getAll('interests') };
@@ -321,7 +374,7 @@ document.addEventListener('submit', async e => {
   finally { if (submit.isConnected) submit.disabled = false; }
 });
 document.addEventListener('error', e => {
-  if (e.target instanceof HTMLImageElement) {
+  if (e.target instanceof HTMLImageElement && e.target.matches('[data-place-photo]')) {
     const replacement = document.createElement('span'); replacement.className = `${e.target.className} photo-placeholder`;
     replacement.setAttribute('role', 'img'); replacement.setAttribute('aria-label', '사진을 불러올 수 없어요');
     replacement.innerHTML = `${icon('pin')}<small>사진을 불러올 수 없어요</small>`; e.target.replaceWith(replacement);

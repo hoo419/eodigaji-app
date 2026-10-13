@@ -12,6 +12,8 @@ await mkdir(outdir, { recursive: true });
 await build({ entryPoints: [resolve(root, 'mobile/entry.js')], outfile: resolve(outdir, 'app.js'), bundle: true, format: 'iife', platform: 'browser', target: ['chrome100'], minify: true, legalComments: 'eof' });
 let html = await readFile(resolve(root, 'public/index.html'), 'utf8');
 html = html.replace('type="module" src="/app.js"', 'defer src="./app.js"').replace('href="/styles.css"', 'href="./styles.css"').replace('href="/favicon.svg"', 'href="./favicon.svg"');
+// Native bundles do not request web-only installation assets.
+html = html.replace(/<link rel="manifest"[^>]*>/g, '').replace(/<link rel="apple-touch-icon"[^>]*>/g, '').replace(/<script type="module" src="\/pwa.js"><\/script>/g, '');
 await writeFile(resolve(outdir, 'index.html'), html);
 let css = await readFile(resolve(root, 'public/styles.css'), 'utf8');
 css = css.replace(/^@import url\([^\n]+\);\r?\n/, '');

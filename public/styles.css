@@ -21,3 +21,16 @@ dialog{border:0;border-radius:22px;padding:0;width:min(580px,calc(100% - 30px));
 .top-actions .btn.logout-top{background:#b42318;color:#fff;border:1px solid #b42318;white-space:nowrap}
 .top-actions .btn.logout-top:hover{background:#912018;border-color:#912018}
 @media(max-width:480px){.topbar{flex-wrap:wrap;height:auto;min-height:68px;gap:10px;padding-top:12px;padding-bottom:12px}.top-actions{margin-left:auto;flex-wrap:wrap;justify-content:flex-end}.top-actions .btn{padding:8px 10px}}
+
+/* 취향 수정: 한 번에 한 항목, 이전/다음 방향에 맞춘 슬라이드. */
+.profile-steps{display:block;overflow:hidden;min-height:190px;padding:8px 2px}
+.profile-step[hidden],#profile-previous[hidden]{display:none!important}
+.profile-step{animation:profile-next .28s ease-out}
+.profile-step.slide-back{animation-name:profile-back}
+.profile-step input,.profile-step select{margin-top:12px}
+.profile-progress{font-size:13px;font-weight:700;color:var(--blue);margin-bottom:10px}
+.profile-progress-track{height:4px;background:var(--line);border-radius:4px;margin-bottom:28px;overflow:hidden}
+.profile-progress-track span{display:block;height:100%;background:var(--blue);transition:width .28s ease}
+@keyframes profile-next{from{opacity:0;transform:translateX(45px)}to{opacity:1;transform:translateX(0)}}
+@keyframes profile-back{from{opacity:0;transform:translateX(-45px)}to{opacity:1;transform:translateX(0)}}
+@media(prefers-reduced-motion:reduce){.profile-step{animation:none}.profile-progress-track span{transition:none}}
