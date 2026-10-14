@@ -2,6 +2,8 @@
 
 연인을 위한 데이트·여행 플래너입니다. 웹/PWA와 Capacitor 기반 Android·iOS 프로젝트를 포함합니다.
 
+[설계서 · 화면 구성과 시나리오 흐름도](docs/설계서.md)
+
 ## 현재 상태 — 2026-10-14
 
 - 운영 서비스: https://eodigaji-app-production.up.railway.app/
@@ -81,7 +83,7 @@ Android 빌드는 Java 21과 Android SDK가 필요합니다. 기존 APK는 최�
 
 ## 검증과 코드 구조
 
-2026-10-14 확인: `npm test` **38개 통과**, `npm run check` 통과.
+2026-10-14 확인: `npm test` **42개 통과**, `npm run check` 통과.
 
 ```sh
 npm test
