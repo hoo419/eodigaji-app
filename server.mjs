@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { loadEnvFile } from 'node:process';
-import { places, planCourse, parseMessage } from './lib/planner.mjs';
+import { places, planCourse, recommendCourses, parseMessage } from './lib/planner.mjs';
 import { createConnections } from './lib/connections.mjs';
 import { createSessions } from './lib/sessions.mjs';
 
@@ -30,7 +30,11 @@ export function createApp({ env = process.env, connections = createConnections(e
   // 호출 제한은 이 프로세스의 메모리에만 유지됩니다. 재시작하면 초기화됩니다.
   const rates = new Map(); let day = '', aiCount = 0;
   const status = connections.publicConfig();
-  async function plan(input) { return planCourse(input, status.places ? await connections.searchPlaces(input.region || '성수') : places); }
+  async function plan(input) {
+    const catalogue = status.places ? await connections.searchPlaces(input.region || '성수') : places;
+    const recommendations = recommendCourses(input, catalogue);
+    return { ...recommendations[0], recommendations, ...(status.places ? { availablePlaces: catalogue } : {}) };
+  }
   return http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
