@@ -48,3 +48,5 @@ dialog{border:0;border-radius:22px;padding:0;width:min(580px,calc(100% - 30px));
 @media(prefers-reduced-motion:no-preference){.boot:before{animation:boot-breathe 1.8s ease-in-out infinite}@keyframes boot-breathe{50%{transform:translateY(-4px);box-shadow:0 18px 40px #3159df44}}}
 
 .route-mode-controls{position:absolute;top:75px;left:12px;right:12px;z-index:5;display:flex;gap:7px}.route-mode-controls .btn{font-size:11px;min-height:32px;padding:7px 12px}.route-links{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}.route-link{font-size:10px;border:1px solid #dce3ed;border-radius:7px;padding:6px 8px;background:white;color:#59677a}.route-link.active{border-color:var(--blue);color:var(--blue);background:var(--blue-soft)}.travel-detail{margin:12px 0 4px;padding:12px;background:#f3f6fa;border-radius:10px;font-size:11px;line-height:1.8}.travel-detail p{font-size:10px;color:var(--muted)}.map-title strong{max-width:65%;line-height:1.6}.course-detail-grid .map-live-error{top:115px}
+
+.map-panel:has(.real-map) .map-legend{bottom:12px}
