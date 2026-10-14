@@ -1,76 +1,102 @@
 # 어디가지 베타
 
-연인을 위한 데이트·여행 플래너입니다. 웹 미리보기와 **Capacitor 기반 설치형 Android 앱 프로젝트**를 포함합니다. Android 앱은 샘플 추천 기능을 자체 실행할 수 있습니다. 설치·테스트용 APK는 `artifacts/eodigaji-beta-debug.apk`에 생성했습니다. 실제 기기 실행 검증은 남아 있습니다. [Android 앱 빌드·설치 안내](docs/android.md)를 참고하세요. iOS 프로젝트는 아직 생성하지 않았습니다.
+연인을 위한 데이트·여행 플래너입니다. 웹/PWA와 Capacitor 기반 Android·iOS 프로젝트를 포함합니다.
 
-**실제 서비스 연결 코드가 추가되었습니다.** Gemini(기본)/OpenAI, 카카오 지도·장소 검색, Supabase 이메일 인증·프로필·저장 코스를 `.env`로 활성화할 수 있습니다. 키가 없는 현재 실행은 샘플 모드입니다. [무료 서비스 발급 및 설정](docs/연동-설정.md)을 따라 키와 DB를 설정해야 하며, 클라우드 배포나 실제 키 검증은 아직 수행하지 않았습니다. 아래 샘플 동작 설명은 키가 없는 모드에 해당합니다.
+## 현재 상태 — 2026-10-14
 
-## 실행
+- 운영 서비스: https://eodigaji-app-production.up.railway.app/
+- 저장소: https://github.com/hoo419/eodigaji-app (`master`, 버전 `0.2.0`)
+- Railway에 배포되었으며 Gemini AI, 카카오 장소 검색·지도, Supabase 인증·프로필·저장 코스 연결이 구성되어 있습니다.
+- 이번 확인: `/api/health`가 `status=ok`, `mode=configured`, `/api/ready`가 `ready=true`를 반환했습니다. `ready`는 환경변수 구성 확인이며 외부 서비스 전체의 동작 검증은 아닙니다.
+- 운영 서버의 HTML, app.js, styles.css, pwa.js가 저장소 소스와 일치함을 확인했습니다(줄바꿈 차이 제외).
+- 기존 배포 기록에는 실제 카카오 장소 검색, Gemini 코스 생성, 지도 이미지 로드 검증이 포함됩니다. [HANDOFF.md](HANDOFF.md)를 참고하세요.
+- 실제 사용자 로그인 → 저장 → 재로그인 후 유지, 인증 메일 복귀 URL, 휴대폰 PWA 설치 확인은 남아 있습니다.
 
-Node.js 22 이상이 필요합니다. 런타임 외 추가 패키지 설치 없이 실행합니다.
+## 주요 기능
+
+- 지역, 데이트/여행, 날짜·시각, 예산, 소요 시간, 분위기, 이동수단, 실내외 조건별 코스 생성
+- Gemini 기반 대화형 조건 변경과 추천, OpenAI 대체 공급자 지원
+- 카카오 장소 검색·지도와 장소/코스 상세
+- Supabase 이메일 회원가입·로그인, 계정별 프로필·취향 및 코스 저장/삭제
+- 이름·성별·나이·성격·MBTI·관심사 단계별 취향 편집
+- 코스 공유, 위치 권한 요청과 지역 직접 선택, PWA 설치 및 공개 오프라인 안내
+
+실시간 영업정보, 날씨, 예약, 정밀한 교통 경로 최적화는 보장하지 않습니다. 비용과 이동시간은 추정값이 포함됩니다. MBTI로 성격을 추론하지 않습니다.
+
+## 로컬 실행
+
+Node.js 22 이상이 필요합니다. 웹 서버는 추가 패키지 설치 없이 실행할 수 있습니다.
 
 ```sh
+git clone https://github.com/hoo419/eodigaji-app.git
+cd eodigaji-app
 npm start
 ```
 
-브라우저에서 http://127.0.0.1:4173 을 엽니다. 서버는 현재 PC의 루프백 주소에서만 실행되므로 외부나 휴대폰에서 직접 접속할 수 없습니다. `PORT` 환경변수로 포트를 변경할 수 있습니다. 서버를 종료하면 미리보기도 종료됩니다.
+브라우저에서 `http://127.0.0.1:4173`을 엽니다. 기본 서버는 루프백 주소로 실행하며 `HOST`, `PORT` 환경변수로 변경할 수 있습니다.
 
-## 구현 범위
+서비스 키 없이 실행하면 가상 장소와 규칙 기반 대화의 샘플 모드입니다. 샘플 프로필과 코스는 브라우저 localStorage에 저장됩니다.
 
-- 게스트 탐색, 로그인·회원가입 체험, 선택형 성별·나이·성격·MBTI·관심사 조사
-- 위치 권한 요청과 지역 직접 선택 대안. 정확한 좌표를 저장하거나 서버로 전송하지 않음
-- 지역(성수/연남/해방촌), 데이트/여행, 날짜·시각, 시간, 1인 예산, 분위기, 이동수단, 실내외 조건
-- 조건을 만족하는 2~4개 샘플 장소로 일정 생성. 예산·시간·실내외 조건이 불가능하면 오류 안내
-- 지도/대화가 공유하는 코스 상태, 검색·분류·확대, 코스 및 장소 상세
-- 코스 저장/삭제, 새로고침 후 유지, 클립보드를 통한 텍스트 공유
-- 프로필 수정 및 브라우저 저장 데이터 초기화
+실제 서비스 연결은 `.env.example`을 `.env`로 복사하고 [연동 설정 안내](docs/연동-설정.md)에 따라 설정합니다.
 
-실제 회원 인증, LLM AI, 지도/장소 API, 실시간 영업정보, 교통·거리 기반 경로 최적화, 클라우드 DB, 기기 간 동기화, 예약 기능은 연결하지 않았습니다. 로그인은 계정 생성이 아닌 체험 프로필 진입입니다. 대화는 지원되는 키워드를 해석하는 규칙 기반 데모이며 일반 자연어 이해를 보장하지 않습니다. 성향은 초기 분위기 선택을 보조하며 현재 일정에서 직접 고른 조건을 우선합니다. MBTI로 성격을 추론하지 않습니다.
+| 설정 | 용도 |
+|---|---|
+| `AI_PROVIDER`, `GEMINI_API_KEY` 또는 `OPENAI_API_KEY` | AI 공급자와 서버 키 |
+| `KAKAO_REST_API_KEY`, `KAKAO_JAVASCRIPT_KEY` | 장소 검색 및 도메인 제한 지도 SDK |
+| `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | 인증과 사용자 데이터 |
+| `APP_ORIGIN` | 인증 메일 복귀 origin |
+| `APP_MODE=live` | AI/장소 공급자 미설정 시 샘플 대체 차단 |
+| `APP_ALLOWED_ORIGINS` | 모바일 등 추가 허용 origin |
 
-장소명과 정보는 가상 샘플입니다. 지도는 SVG 개념도이며 실제 지리적 위치가 아닙니다. 이동시간은 수단별 고정 샘플값입니다. 날짜는 일정에 보존하지만 영업 여부와 날씨 조회에는 사용하지 않습니다. 비용은 장소 비용이며 교통비를 포함하지 않습니다.
+비밀 키는 `.env` 또는 서버 환경변수에만 보관합니다. GitHub 소스와 공개 작업이전 ZIP에는 운영 서버의 비밀 키가 포함되지 않습니다.
 
-사진은 Unsplash, 글꼴은 Google Fonts에서 불러오므로 해당 자산은 인터넷 연결이 필요합니다. 자산을 가져오지 못해도 시스템 글꼴과 배경색으로 기능을 사용할 수 있습니다. 외부 이미지 요청에는 브라우저의 일반 네트워크 정보가 전송됩니다.
+## Railway 배포
 
-## 서버 구성
+`Dockerfile`과 `railway.json`을 포함합니다. 컨테이너는 Node.js 24, `HOST=0.0.0.0`, `APP_MODE=live`로 실행하며 준비 확인 경로는 `/api/ready`입니다.
 
-현재: 브라우저 → 로컬 Node HTTP 서버 → 메모리의 샘플 장소/추천 함수. 프로필 및 저장 코스는 브라우저 localStorage에만 보관합니다. 서버는 JSON API 입력 검증과 정적 파일 허용 목록을 적용합니다. `.git`, 프로젝트 문서, 소스 모듈을 정적 파일로 공개하지 않습니다. 요청 본문 상한은 16KB입니다.
+현재 배포는 Railway CLI 업로드 방식입니다. **GitHub 자동 배포는 연결되지 않았으므로 GitHub 커밋만으로 운영 서버가 갱신되지 않습니다.** 배포 이력과 명령은 [HANDOFF.md](HANDOFF.md)에 있습니다. 기존 배포 패키지를 재사용할 때는 먼저 소스를 최신화하세요.
 
-| API | 요청 | 응답 |
-|---|---|---|
-| `GET /api/health` | 없음 | 실행 상태, demo 모드 |
-| `GET /api/places` | 없음 | 24개 샘플 장소 |
-| `POST /api/plan` | 조건 객체 | 코스·방문 시각·1인 비용·소요 시간 |
-| `POST /api/chat` | `{ message, conditions }` | 응답 문구와 변경된 코스 또는 null |
+운영 환경변수에서 `APP_ORIGIN=https://eodigaji-app-production.up.railway.app`과 필요한 키를 설정하고 카카오 웹 도메인 및 Supabase 복귀 URL을 확인해야 합니다. 로그인 세션은 메모리에 보관되어 서버 재시작·재배포 시 재로그인이 필요할 수 있습니다. 계정 데이터는 Supabase에 저장됩니다. 서비스 워커는 계정·코스·API를 캐시하지 않습니다. 미사용 시 서버가 잠들 수 있습니다.
 
-POST 요청은 `Content-Type: application/json`을 사용합니다. 예시:
+## Android·iOS
+
+Android와 iOS 소스가 모두 있습니다. 현재 `mobile/config.json`의 `apiBase`가 비어 있어 모바일은 오프라인 샘플 모드입니다. 운영 서버 연결은 다음 값으로 설정한 뒤 동기화·빌드해야 합니다.
 
 ```json
-{"region":"성수","purpose":"데이트","budget":30000,"duration":180,"start":"14:00","environment":"실내","mood":"여유로운","transport":"도보"}
+{ "apiBase": "https://eodigaji-app-production.up.railway.app" }
 ```
 
-향후 실서비스 운영안(미구현): HTTPS 클라우드 API 서버에서 AI와 지도/장소 API를 호출하고, Supabase Auth/PostgreSQL을 회원·데이터 저장 후보로 사용합니다. API 키는 서버 비밀 환경변수에만 저장합니다. 로그인 검증과 사용자별 접근 제어, 요청 한도·AI 비용 상한, 재시도·장애 기록, 백업 및 복구 검증을 추가해야 합니다. 실제 위치 처리는 사용자 동의를 바탕으로 최소 범위에서 설계합니다. 클라우드 계정, 호스팅 제공업체, 요금제, 배포는 아직 결정하거나 생성하지 않았습니다.
+```sh
+npm ci
+npm run android:build
+# Mac에서 iOS 동기화·Xcode 열기
+npm run ios:sync
+npm run ios:open
+```
 
-## 코드 구조와 확인
+Android 빌드는 Java 21과 Android SDK가 필요합니다. 기존 APK는 최신 웹 배포를 반영한 새 빌드가 아닙니다. iOS는 Xcode 소스를 준비했지만 Windows에서 IPA를 컴파일·서명하지 않았습니다. 실기기 검증은 남아 있습니다.
 
-- `public/app.js`: 상태, 화면과 사용자 조작
-- `public/styles.css`, `public/icons.js`: 반응형 디자인과 SVG 아이콘
-- `lib/planner.mjs`: 샘플 데이터, 조건 검증, 조합 탐색 및 키워드 해석
-- `server.mjs`: 정적 파일과 JSON API
-- `tests/planner.test.mjs`, `tests/server.test.mjs`: 추천 및 실제 HTTP 테스트
-- `tests/browser-smoke.cjs`: 데스크톱/모바일의 핵심 사용자 흐름 검증
+- [Android 빌드·설치](docs/android.md)
+- [iOS 빌드](docs/ios.md)
+
+## 검증과 코드 구조
+
+2026-10-14 확인: `npm test` **38개 통과**, `npm run check` 통과.
 
 ```sh
 npm test
 npm run check
 ```
 
-브라우저 테스트는 실행 중인 로컬 서버와 Playwright/Chromium이 필요합니다. 설치된 `playwright` 또는 `PLAYWRIGHT_MODULE`로 지정한 패키지를 사용하고, 이 작업 환경에서는 Codex 번들 런타임을 대안으로 사용합니다.
+| 경로 | 역할 |
+|---|---|
+| `public/` | 웹 UI·지도·PWA |
+| `server.mjs`, `lib/` | API·추천·서비스 연결·세션 |
+| `supabase/` | DB 설정 |
+| `mobile/`, `android/`, `ios/` | 모바일 구성과 플랫폼 소스 |
+| `tests/` | 추천·인증·서버·모바일·PWA 검증 |
+| `HANDOFF.md` | 작업 상태 및 배포 인수인계 |
+| `docs/작업이전.md` | 다른 PC·USB로 작업 이전하는 절차 |
+| `transfer/` | 공개 소스 작업이전 ZIP |
 
-```sh
-node tests/browser-smoke.cjs
-```
-
-결과 스크린샷은 `artifacts/`에 저장됩니다. 테스트는 별도 브라우저 컨텍스트를 사용하므로 사용자 프로필·저장 코스를 변경하지 않습니다.
-
-
-## 2026-09-30 모바일 0.2.0
-Android 신규 빌드와 iOS Xcode 소스를 준비했습니다. 모바일은 현재 공개 서버 주소가 없는 오프라인 샘플 모드입니다. 최신 상세 상태는 개발 작업 요약과 docs/ios.md를 확인하세요. iOS IPA는 Windows에서 컴파일하지 않았습니다.
+사진과 일부 글꼴은 외부 자산을 사용하며 로딩 실패 시 대체 표시를 제공합니다.
