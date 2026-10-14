@@ -84,3 +84,28 @@ test('restaurant presence does not override a better matching non-meal combinati
   const course = planCourse({ duration: 100 }, catalogue, { category: '카페' });
   assert.deepEqual(course.places.map(p => p.id).sort(), ['cafe', 'park']);
 });
+
+test('joint theme selection prefers indoor cafe/culture and outdoor park examples', () => {
+  const catalogue = ['카페', '문화', '식사', '산책'].flatMap((category, group) =>
+    Array.from({ length: 3 }, (_, i) => ({ id: group + '-' + i, region: '다양성동', category,
+      cost: 1000, stay: 20, environment: category === '산책' || (category === '카페' && i === 2) ? '실외' : '실내', demo: false })));
+  const courses = recommendCourses({ region: '다양성동' }, catalogue, { random: () => 0.5 });
+  assert.equal(courses.length, 3);
+  assert.equal(new Set(courses.map(c => c.places.map(p => p.id).sort().join('|'))).size, 3);
+  for (const course of courses) {
+    const expected = course.concept === '공원 데이트' ? '실외' : '실내';
+    assert.ok(course.places.every(p => p.environment === expected));
+  }
+  const first = courses.find(c => c.concept === '카페 데이트');
+  const second = courses.find(c => c.concept === '문화 데이트');
+  const overlap = first.places.filter(p => second.places.some(q => q.id === p.id)).length;
+  assert.ok(Math.min(first.places.length, second.places.length) - overlap >= 2);
+  const next = recommendCourses({ region: '다양성동' }, catalogue, { random: () => 0.5 });
+  assert.notDeepEqual(next.map(c => c.places.map(p => p.id).sort()), courses.map(c => c.places.map(p => p.id).sort()));
+});
+
+test('a sparse catalogue cannot create duplicate themed examples', () => {
+  const catalogue = ['카페', '문화'].map((category, i) => ({ id: 'only-' + i, region: '후보동', category, cost: 1000, stay: 20, environment: '실내', demo: false }));
+  const courses = recommendCourses({ region: '후보동' }, catalogue);
+  assert.equal(courses.length, 1);
+});
