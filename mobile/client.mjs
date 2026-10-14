@@ -1,4 +1,4 @@
-import { places, planCourse, parseMessage } from '../lib/planner.mjs';
+import { places, planCourse, recommendCourses, parseMessage } from '../lib/planner.mjs';
 
 // 빈 주소는 오프라인 체험을 뜻합니다. 실제 서버는 경로·인증정보 없는 HTTPS origin만 허용합니다.
 export function validateServerUrl(value = '') {
@@ -26,7 +26,7 @@ export function createMobileClient({ apiBase = '', request } = {}) {
     if (path === '/api/health') return { status: 'ok', mode: 'offline-demo' };
     if (path === '/api/places') return places;
     if (path === '/api/auth/user') return { user: null };
-    if (path === '/api/plan') return planCourse(body || {});
+    if (path === '/api/plan') { const recommendations = recommendCourses(body || {}); return { ...recommendations[0], recommendations }; }
     if (path === '/api/chat') {
       if (typeof body?.message !== 'string' || !body.message.trim() || body.message.length > 1500) throw new Error('메시지는 1~1500자로 입력해 주세요.');
       const parsed = parseMessage(body.message, body.conditions || {});
