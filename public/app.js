@@ -14,7 +14,7 @@ const readSaved = stored('saved', []);
 // 화면 상태의 중심입니다. 상태를 바꾼 뒤 render()를 호출해 해당 화면을 다시 그립니다.
 const state = {
   config: { ai: false, places: false, map: false, auth: false }, user: null,
-  tab: 'explore', view: 'map', filter: '전체', query: '', zoom: 1, places: [], course: null, selected: null, recommendations: [], courseChosen: false, mapExpanded: false,
+  tab: 'explore', view: 'map', filter: '전체', query: '', zoom: 1, places: [], course: null, selected: null, recommendations: [], courseChosen: false, mapExpanded: false, routeMode: null, routeDetails: null, routeBusy: false,
   profile: readProfile && typeof readProfile.name === 'string' ? readProfile : null,
   saved: Array.isArray(readSaved) ? readSaved.filter(c => c && typeof c.id === 'string' && Array.isArray(c.places) && c.conditions) : [],
   conditions: { region: '성수', purpose: '데이트', budget: 50000, duration: 240, start: '14:00', date: dateISO, environment: '전체', mood: '여유로운', transport: '도보' },
@@ -58,7 +58,7 @@ function render() {
   if (state.view === 'chat') { const messages = $('.messages'); if (messages) messages.scrollTop = messages.scrollHeight; }
   if (state.tab === 'explore' || state.tab === 'course') {
     const foot = $('.sample-foot'); if (foot) foot.textContent = state.course?.demo ? `샘플 장소 코스 · ${state.config.ai ? '실제 AI 조건 분석' : '규칙 기반 대화 체험'} · 실제 지도·장소 연동은 상단 서비스 설정에서 확인하세요.` : '카카오 장소 검색 결과 · 비용·체류·이동 시간·실내외는 추정이며 검증된 영업 정보가 아닙니다. 지도 선은 방문 순서로 실제 길찾기가 아닙니다.';
-    if (!state.course?.demo) { const note = $('.map-legend p'); if (note) note.textContent = '실제 장소 위치 · 파란 선은 방문 순서 (길찾기 아님)'; const credit = $('.map-credit'); if (credit) credit.textContent = ''; }
+    if (!state.course?.demo) { const credit = $('.map-credit'); if (credit) credit.textContent = ''; }
     if (state.config.ai) { const sub = $('.chat-heading p'); if (sub) sub.textContent = `${state.config.aiProvider === 'gemini' ? 'Gemini' : 'OpenAI'} 연결 · 입력한 조건을 분석해요`; }
     refreshLiveMap();
   }
@@ -78,9 +78,9 @@ function render() {
 }
 function refreshLiveMap() {
   const target = $('#real-map');
-  if (target && state.config.map) mountLiveMap(target, state.config.mapKey, state.courseChosen ? state.course?.places || [] : [], state.courseChosen ? state.course?.places || [] : [], id => placeDialog(id));
+  if (target && state.config.map) mountLiveMap(target, state.config.mapKey, state.courseChosen ? state.course?.places || [] : [], state.courseChosen ? state.course?.places || [] : [], id => placeDialog(id), state.routeDetails);
 }
-function acceptCourse(course) { state.courseChosen = false; state.mapExpanded = false; state.recommendations = course.recommendations || [course]; state.course = course; state.conditions = course.conditions; if (course.availablePlaces) state.places = course.availablePlaces; }
+function acceptCourse(course) { state.routeMode = null; state.routeDetails = null; state.routeBusy = false; state.courseChosen = false; state.mapExpanded = false; state.recommendations = course.recommendations || [course]; state.course = course; state.conditions = course.conditions; if (course.availablePlaces) state.places = course.availablePlaces; }
 function greeting(title, sub, eyebrow = 'MAKE ROOM FOR A LITTLE ADVENTURE') { return `<section class="greeting"><div><span class="eyebrow">${eyebrow}</span><h1>${title}</h1><p>${sub}</p></div><span class="date">${icon('calendar')}${esc(today.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' }))}</span></section>`; }
 function explore() {
   const c = state.conditions;
@@ -100,15 +100,38 @@ function discovery() {
   const courses = state.recommendations.length ? state.recommendations : state.course ? [state.course] : [];
   return '<section class="discovery"><div class="section-title"><h2>어떤 하루가 끌리세요?</h2><small>조건에 맞는 코스를 골라 주세요</small></div><div class="recommendations">' + courses.map((course, i) => '<article class="recommendation"><div class="recommendation-photo">' + photo(course.places[0]) + '</div><div class="recommendation-body"><span class="tag blue">' + esc(course.label || String.fromCharCode(65 + i)) + ' 코스</span><h3>' + esc(course.concept || course.title) + '</h3><p>' + course.places.map(p => esc(p.name)).join(' → ') + '</p><div class="course-stats"><span>' + length(course.minutes) + '</span><span>1인 예상 ' + won(course.totalCost) + '</span></div>' + btn('choose-course', '이 코스 선택', 'arrow', 'primary full', 'data-id="' + esc(course.id) + '"') + '</div></article>').join('') + '</div><button class="ai-invite" data-action="view" data-view="chat">' + icon('spark') + '<div><strong>다른 하루를 원하시나요?</strong><p>AI에게 취향을 알려 주세요.</p></div></button></section>';
 }
+function routeLinks(a, b) {
+  if (![a.lat,a.lng,b.lat,b.lng].every(Number.isFinite)) return '<span class="small muted">샘플 장소 · 실제 길찾기 없음</span>';
+  const point = p => encodeURIComponent(p.name) + ',' + p.lat + ',' + p.lng;
+  return '<div class="route-links">' + [['도보','walk'],['대중교통','traffic'],['자동차','car']].map(([label,mode]) => '<a class="route-link ' + (state.routeMode === label ? 'active' : '') + '" href="https://map.kakao.com/link/by/' + mode + '/' + point(a) + '/' + point(b) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + ' 실제 길찾기 ↗</a>').join('') + '</div>';
+}
+function routeLegDetails(course,i) {
+  const next = course.places[i+1], leg = state.routeDetails?.legs[i];
+  const mode = state.routeMode || course.conditions.transport;
+  const summary = leg?.actual ? mode + ' 경로 조회 · ' + leg.minutes + '분 · ' + (leg.distance/1000).toFixed(1) + 'km' : state.routeBusy ? mode + ' 실제 경로 확인 중…' : mode + ' 실제 경로 미조회 · 아래에서 확인';
+  return '<div class="travel-detail"><strong>' + esc(summary) + '</strong><p>' + (leg?.actual ? '조회 시점의 예상 이동시간' : '일정의 시간은 거리 기반 추정이며, 실제 인도·도로·환승 경로가 아닙니다.') + '</p>' + routeLinks(course.places[i],next) + '</div>';
+}
+async function loadCourseRoute(mode) {
+  const course=state.course; if (!course) return;
+  state.routeMode=mode; state.routeDetails=null; state.routeBusy=!course.demo; render();
+  if (course.demo) return;
+  try {
+    const result=await api('/api/route',{mode,points:course.places.map(p=>({name:p.name,lat:p.lat,lng:p.lng}))});
+    if(state.course?.id===course.id && state.routeMode===mode) state.routeDetails=result;
+  } catch {}
+  finally { if(state.course?.id===course.id && state.routeMode===mode){state.routeBusy=false;render();} }
+}
 function coursePage() {
   const course = state.course;
   if (!course) { state.tab = 'explore'; return explore(); }
-  return greeting(esc(course.concept || course.title), '선택한 장소와 방문 순서를 한눈에 확인하세요.', 'OUR DATE ROUTE') + '<div class="detail-actions">' + btn('other-courses', '다른 코스 선택', 'back', 'outline') + btn('save', isSaved(course) ? '저장 취소' : '코스 저장', 'heart', 'primary', 'data-id="' + esc(course.id) + '"') + btn('share', '공유', 'share', 'outline', 'data-id="' + esc(course.id) + '"') + '</div><div class="course-detail-grid"><section class="route-detail"><div class="detail-summary"><span>' + length(course.minutes) + '</span><span>1인 예상 ' + won(course.totalCost) + '</span><span>' + esc(course.conditions.start) + '–' + esc(course.end) + '</span></div><div class="timeline">' + course.places.map((p,i) => '<div class="stop"><time>' + esc(p.time) + '</time><span class="stop-number">' + (i+1) + '</span><div><button class="stop-place" data-action="place" data-id="' + esc(p.id) + '">' + photo(p) + '<span><h3>' + esc(p.name) + '</h3><p>' + esc(p.category) + ' · ' + p.stay + '분 · 예상 ' + won(p.cost) + '</p></span></button>' + (i < course.places.length - 1 ? '<p class="travel-note">' + esc(course.conditions.transport) + ' 약 ' + course.places[i+1].travel + '분' + (course.places[i+1].travelDistance != null ? ' · 거리 추정 ' + (course.places[i+1].travelDistance / 1000).toFixed(1) + 'km' : '') + ' · ' + esc(course.places[i+1].travelBasis || '이전 코스 추정치') + '</p>' : '') + '</div></div>').join('') + '</div></section>' + mapPanel() + '</div><p class="sample-foot">예상 일정 · 실제 길찾기와 영업 여부는 방문 전에 확인하세요.</p>';
+  return greeting(esc(course.concept || course.title), '선택한 장소와 방문 순서를 한눈에 확인하세요.', 'OUR DATE ROUTE') + '<div class="detail-actions">' + btn('other-courses', '다른 코스 선택', 'back', 'outline') + btn('save', isSaved(course) ? '저장 취소' : '코스 저장', 'heart', 'primary', 'data-id="' + esc(course.id) + '"') + btn('share', '공유', 'share', 'outline', 'data-id="' + esc(course.id) + '"') + '</div><div class="course-detail-grid"><section class="route-detail"><div class="detail-summary"><span>' + length(course.minutes) + '</span><span>1인 예상 ' + won(course.totalCost) + '</span><span>' + esc(course.conditions.start) + '–' + esc(course.end) + '</span></div><div class="timeline">' + course.places.map((p,i) => '<div class="stop"><time>' + esc(p.time) + '</time><span class="stop-number">' + (i+1) + '</span><div><button class="stop-place" data-action="place" data-id="' + esc(p.id) + '">' + photo(p) + '<span><h3>' + esc(p.name) + '</h3><p>' + esc(p.category) + ' · ' + p.stay + '분 · 예상 ' + won(p.cost) + '</p></span></button>' + (i < course.places.length - 1 ? routeLegDetails(course,i) : '') + '</div></div>').join('') + '</div></section>' + mapPanel() + '</div><p class="sample-foot">예상 일정 · 실제 길찾기와 영업 여부는 방문 전에 확인하세요.</p>';
 }
 function miniPlace(p) { return `<button class="mini-place" data-action="place" data-id="${esc(p.id)}"><span class="thumb">${photo(p)}</span><span><small>${esc(p.category)} · ${esc(p.region)}</small><h3>${esc(p.name)}</h3><p>${esc(p.environment)} · ${p.estimated ? '예상 ' : ''}${won(p.cost)}</p></span>${icon('chevron')}</button>`; }
 function filteredPlaces() { return state.places.filter(p => p.region === state.conditions.region && (state.filter === '전체' || p.category === state.filter) && `${p.name} ${p.category} ${p.description} ${p.region}`.includes(state.query)); }
 function mapPanel() {
-  return '<section class="map-panel ' + (state.mapExpanded ? 'map-expanded' : '') + '" aria-label="선택한 코스 지도"><div class="map-title"><strong>' + (state.courseChosen ? '선택한 코스 경로' : '코스를 선택해 주세요') + '</strong>' + btn('expand-map', state.mapExpanded ? '지도 작게 보기' : '지도 크게 보기', 'map', 'outline') + '</div><div id="map-render">' + (state.courseChosen ? mapArt() : '<div class="map-live-error">A·B·C 코스 중 원하는 하루를 고르면<br>그 코스의 장소와 순서만 표시합니다.</div>') + '</div><div class="map-controls">' + actionIcon('zoom-in','plus','지도 확대') + actionIcon('zoom-out','minus','지도 축소') + '</div><div class="map-legend"><div><strong>' + (state.courseChosen ? esc(state.conditions.region) + ' · ' + state.course.places.length + '곳' : '우리의 하루를 먼저 골라보세요') + '</strong><p>번호는 방문 순서 · 연결선은 실제 길찾기가 아닙니다</p></div></div></section>';
+  const mode = state.routeMode || state.conditions.transport;
+  const routeStatus = state.routeBusy ? '실제 경로 조회 중' : state.routeDetails?.actual ? '카카오 실제 경로' : '방문 순서 · 실제 경로 미조회';
+  return '<section class="map-panel ' + (state.mapExpanded ? 'map-expanded' : '') + '" aria-label="선택한 코스 지도"><div class="map-title"><strong>' + (state.courseChosen ? esc(mode) + ' · ' + routeStatus : '코스를 선택해 주세요') + '</strong>' + btn('expand-map', state.mapExpanded ? '지도 작게 보기' : '지도 크게 보기', 'map', 'outline') + '</div><div class="route-mode-controls">' + (state.courseChosen ? ['도보','대중교통','자동차'].map(label => btn('route-mode', label, '', mode === label ? 'primary' : 'outline', 'data-mode="' + label + '" aria-pressed="' + (mode === label) + '"')).join('') : '') + '</div><div id="map-render">' + (state.courseChosen ? mapArt() : '<div class="map-live-error">A·B·C 코스 중 원하는 하루를 고르면<br>그 코스의 장소와 순서만 표시합니다.</div>') + '</div><div class="map-controls">' + actionIcon('zoom-in','plus','지도 확대') + actionIcon('zoom-out','minus','지도 축소') + '</div><div class="map-legend"><div><strong>' + (state.courseChosen ? esc(state.conditions.region) + ' · ' + state.course.places.length + '곳' : '우리의 하루를 먼저 골라보세요') + '</strong><p>' + (state.routeDetails?.actual ? esc(mode) + ' 경로 · 도보 녹색 / 대중교통 보라색 / 자동차 파란색' : '회색 점선은 방문 순서 · 실제 경로가 아닙니다') + '</p></div></div></section>';
 }
 function mapArt() {
   if (state.course && !state.course.demo) return state.config.map ? '<div id="real-map" class="real-map" aria-label="카카오 지도"></div>' : '<div class="map-live-error">실제 장소를 검색했어요. 지도를 표시하려면 서비스 설정에서 카카오 JavaScript 키를 등록해 주세요.</div>';
@@ -279,7 +302,8 @@ document.addEventListener('click', async e => {
   if (action === 'filters') filtersDialog();
   if (action === 'category') { state.filter = target.dataset.category; render(); }
   if (['zoom-in', 'zoom-out', 'map-reset'].includes(action)) { if (state.course && !state.course.demo) { if (action === 'map-reset') refreshLiveMap(); else zoomLiveMap(action === 'zoom-in' ? -1 : 1); } else { state.zoom = action === 'map-reset' ? 1 : Math.max(1, Math.min(1.75, state.zoom + (action === 'zoom-in' ? .25 : -.25))); $('#map-render').innerHTML = mapArt(); } }
-  if (action === 'course' || action === 'choose-course') { const course = lookupCourse(id); if (course) { state.course = course; state.conditions = course.conditions; state.courseChosen = true; state.tab = 'course'; state.mapExpanded = false; closeDialog(); render(); window.scrollTo(0,0); } }
+  if (action === 'course' || action === 'choose-course') { const course = lookupCourse(id); if (course) { state.course = course; state.conditions = course.conditions; state.courseChosen = true; state.tab = 'course'; state.mapExpanded = false; state.routeMode = course.conditions.transport; closeDialog(); await loadCourseRoute(state.routeMode); window.scrollTo(0,0); } }
+  if (action === 'route-mode') await loadCourseRoute(target.dataset.mode);
   if (action === 'other-courses') { state.courseChosen = false; state.tab = 'explore'; state.mapExpanded = false; render(); window.scrollTo(0,0); }
   if (action === 'expand-map') { state.mapExpanded = !state.mapExpanded; render(); }
   if (action === 'place') placeDialog(id, target.dataset.from === 'course');
@@ -311,7 +335,7 @@ document.addEventListener('click', async e => {
   if (action === 'about') openDialog('어디가지 베타 · 체험 안내', '<h3 class="intro-title">대화로 찾는<br>우리만의 다음 목적지.</h3><p>지도 탐색, 대화형 코스 추천, 성향 조사, 코스 저장을 미리 경험하는 시제품입니다.</p><div class="info-line"><strong>지금 작동하는 기능</strong><p>조건별 샘플 코스 생성, 조건을 해석하는 규칙 기반 대화, 장소 검색, 지도 확대, 코스 상세, 브라우저 저장과 텍스트 공유</p></div><div class="info-line"><strong>실서비스 연결 전인 기능</strong><p>실제 회원 인증, 대규모 언어 모델 AI, 실제 지도·영업정보·교통 경로, 클라우드 동기화</p></div><div class="info-line"><strong>서버 운영</strong><p>현재 PC의 로컬 Node 서버에서 실행됩니다. 외부 사용자에게 공개되거나 클라우드에 배포된 상태가 아닙니다.</p></div>', btn('close', '확인했어요', '', 'primary'));
 });
 document.addEventListener('input', e => { if (e.target.id === 'map-search') { state.query = e.target.value; $('#map-render').innerHTML = mapArt(); refreshLiveMap(); const d = $('.discovery'); if (d) d.outerHTML = discovery(); } });
-document.addEventListener('keydown', e => { if (e.target.id === 'chat-input' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#chat-form').requestSubmit(); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && state.mapExpanded) { state.mapExpanded = false; render(); } if (e.target.id === 'chat-input' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#chat-form').requestSubmit(); } });
 document.addEventListener('submit', async e => {
   e.preventDefault();
   if (e.target.id === 'chat-form') return sendChat(new FormData(e.target).get('message'));
