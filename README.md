@@ -83,7 +83,7 @@ Android 빌드는 Java 21과 Android SDK가 필요합니다. 기존 APK는 최�
 
 ## 검증과 코드 구조
 
-2026-10-14 확인: `npm test` **54개 통과**, `npm run check` 통과.
+2026-10-14 확인: `npm test` **56개 통과**, `npm run check` 통과.
 
 ```sh
 npm test
@@ -102,3 +102,10 @@ npm run check
 | `transfer/` | 공개 소스 작업이전 ZIP |
 
 사진과 일부 글꼴은 외부 자산을 사용하며 로딩 실패 시 대체 표시를 제공합니다.
+
+## 개발 설계 문서
+
+- [기능설계서](docs/기능설계서.md)
+- [설계 흐름도](docs/설계흐름도.md)
+- [DB 설계도](docs/DB설계도.md)
+- [통합 설계서](docs/설계서.md)
