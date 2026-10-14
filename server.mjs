@@ -7,6 +7,7 @@ import { loadEnvFile } from 'node:process';
 import { places, planCourse, recommendCourses, parseMessage } from './lib/planner.mjs';
 import { createConnections } from './lib/connections.mjs';
 import { createSessions } from './lib/sessions.mjs';
+import { createRouting } from './lib/routing.mjs';
 
 const publicDir = fileURLToPath(new URL('./public/', import.meta.url));
 const assets = { '/': ['index.html', 'text/html'], '/index.html': ['index.html', 'text/html'], '/styles.css': ['styles.css', 'text/css'], '/app.js': ['app.js', 'text/javascript'], '/icons.js': ['icons.js', 'text/javascript'], '/favicon.svg': ['favicon.svg', 'image/svg+xml'] };
@@ -27,6 +28,7 @@ export function createApp({ env = process.env, connections = createConnections(e
   const live = env.APP_MODE === 'live';
   const allowedOrigins = new Set([origin, ...(!live ? ['http://localhost:4173'] : []), ...(env.APP_ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean)]);
   const sessions = createSessions(connections, origin);
+  const courseRoutes = createRouting(env);
   // 호출 제한은 이 프로세스의 메모리에만 유지됩니다. 재시작하면 초기화됩니다.
   const rates = new Map(); let day = '', aiCount = 0;
   const status = connections.publicConfig();
@@ -100,6 +102,7 @@ export function createApp({ env = process.env, connections = createConnections(e
         return json(res, 405, { error: '지원하지 않는 요청입니다.' });
       }
       if (req.method === 'POST' && path === '/api/plan') return json(res, 200, await plan(await readJson(req)));
+      if (req.method === 'POST' && path === '/api/route') { const { points, mode } = await readJson(req); return json(res, 200, await courseRoutes(points, mode)); }
       if (req.method === 'POST' && path === '/api/chat') {
         const { message, conditions = {}, history = [] } = await readJson(req);
         if (typeof message !== 'string' || !message.trim() || message.length > 1500) throw new Error('메시지는 1~1500자로 입력해 주세요.');

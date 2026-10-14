@@ -83,7 +83,7 @@ Android 빌드는 Java 21과 Android SDK가 필요합니다. 기존 APK는 최�
 
 ## 검증과 코드 구조
 
-2026-10-14 확인: `npm test` **42개 통과**, `npm run check` 통과.
+2026-10-14 확인: `npm test` **47개 통과**, `npm run check` 통과.
 
 ```sh
 npm test
