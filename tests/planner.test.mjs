@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { planCourse, parseMessage } from '../lib/planner.mjs';
+import { planCourse, parseMessage, recommendCourses } from '../lib/planner.mjs';
 
 test('course respects per-person budget and available time', () => {
   const p = planCourse({ region: '성수', budget: 20000, duration: 120, start: '14:00' });
@@ -50,4 +50,37 @@ test('indoor/outdoor neutral preference does not accidentally become indoor only
 });
 test('an unsupported named destination with a budget must not reuse the previous region', () => {
   assert.throws(() => parseMessage('부산에서 3만원 데이트', { region: '성수' }), /지역/);
+});
+
+test('themes require one anchor and combine different categories without repetition', () => {
+  const catalogue = ['카페', '문화', '식사', '산책'].flatMap((category, group) =>
+    Array.from({ length: 3 }, (_, i) => ({ id: group + '-' + i, region: '성수', category,
+      cost: category === '식사' ? 20000 : category === '산책' ? 0 : 7000, stay: 40,
+      environment: category === '산책' ? '실외' : '실내', mood: '여유로운', demo: false })));
+  const courses = recommendCourses({}, catalogue);
+  assert.equal(courses.length, 3);
+  for (const course of courses) {
+    assert.equal(new Set(course.places.map(p => p.category)).size, course.places.length);
+    const anchor = { '카페 데이트': '카페', '문화 데이트': '문화', '공원 데이트': '산책' }[course.concept];
+    assert.equal(course.places.filter(p => p.category === anchor).length, 1);
+    assert.ok(course.totalCost <= course.conditions.budget);
+    assert.ok(course.minutes <= course.conditions.duration);
+  }
+});
+
+test('budget constraints can produce a harmonious course without a restaurant', () => {
+  const course = planCourse({ environment: '전체', budget: 10000 });
+  assert.ok(course.totalCost <= 10000);
+  assert.ok(course.places.every(p => p.category !== '식사'));
+  assert.equal(new Set(course.places.map(p => p.category)).size, course.places.length);
+});
+
+test('restaurant presence does not override a better matching non-meal combination', () => {
+  const catalogue = [
+    { id: 'cafe', category: '카페', mood: '여유로운' },
+    { id: 'park', category: '산책', mood: '여유로운' },
+    { id: 'food', category: '식사', mood: '로맨틱한' },
+  ].map(p => ({ ...p, region: '성수', cost: 5000, stay: 40, environment: '실내', demo: false }));
+  const course = planCourse({ duration: 100 }, catalogue, { category: '카페' });
+  assert.deepEqual(course.places.map(p => p.id).sort(), ['cafe', 'park']);
 });
