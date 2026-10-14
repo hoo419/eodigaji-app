@@ -15,14 +15,17 @@ export async function mountLiveMap(element, key, places, route, onSelect) {
   map = null;
   try {
     const maps = await sdk(key); if (!element.isConnected) return;
-    const points = places.filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+    const points = route.filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
     const center = points[0] || { lat: 37.5445, lng: 127.0557 };
     map = new maps.Map(element, { center: new maps.LatLng(center.lat, center.lng), level: 5 });
     const bounds = new maps.LatLngBounds();
-    for (const p of points) {
+    for (const [index, p] of points.entries()) {
       const position = new maps.LatLng(p.lat, p.lng); bounds.extend(position);
-      const marker = new maps.Marker({ map, position, title: p.name });
-      maps.event.addListener(marker, 'click', () => onSelect(p.id));
+      const content = document.createElement('button');
+      content.className = 'route-marker'; content.textContent = String(index + 1); content.title = p.name;
+      content.setAttribute('aria-label', (index + 1) + '번 ' + p.name);
+      content.addEventListener('click', () => onSelect(p.id));
+      new maps.CustomOverlay({ map, position, content, yAnchor: 1 });
     }
     if (points.length > 1) map.setBounds(bounds, 110, 40, 110, 40);
     const path = route.filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng)).map(p => new maps.LatLng(p.lat, p.lng));

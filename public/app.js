@@ -14,7 +14,7 @@ const readSaved = stored('saved', []);
 // 화면 상태의 중심입니다. 상태를 바꾼 뒤 render()를 호출해 해당 화면을 다시 그립니다.
 const state = {
   config: { ai: false, places: false, map: false, auth: false }, user: null,
-  tab: 'explore', view: 'map', filter: '전체', query: '', zoom: 1, places: [], course: null, selected: null,
+  tab: 'explore', view: 'map', filter: '전체', query: '', zoom: 1, places: [], course: null, selected: null, recommendations: [], courseChosen: false, mapExpanded: false,
   profile: readProfile && typeof readProfile.name === 'string' ? readProfile : null,
   saved: Array.isArray(readSaved) ? readSaved.filter(c => c && typeof c.id === 'string' && Array.isArray(c.places) && c.conditions) : [],
   conditions: { region: '성수', purpose: '데이트', budget: 50000, duration: 240, start: '14:00', date: dateISO, environment: '전체', mood: '여유로운', transport: '도보' },
@@ -34,8 +34,15 @@ async function api(path, body) {
   } catch (e) { if (e.name === 'AbortError' || e instanceof TypeError) throw new Error('서버에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.'); throw e; }
   finally { clearTimeout(timeout); }
 }
+const installed = () => !!window.EodigajiNative || window.eodigajiInstalled === true || window.matchMedia?.('(display-mode: standalone)')?.matches || navigator.standalone === true;
 const brand = '<span class="brand">어디가지<span class="beta">베타</span></span>';
-const photo = (p, cls = 'photo') => p.photo ? `<img data-place-photo class="${cls}" src="https://images.unsplash.com/${esc(p.photo)}?auto=format&fit=crop&w=900&q=80" alt="${esc(p.category)} 분위기 참고 사진" loading="lazy" referrerpolicy="no-referrer">` : `<span class="${cls} photo-placeholder" role="img" aria-label="${esc(p.name)} 사진 미제공">${icon(p.category === '카페' ? 'coffee' : 'pin')}<small>장소 사진 미제공</small></span>`;
+const referencePhotos = { '카페': ['photo-1442512595331-e89e73853f31','photo-1501339847302-ac426a4a7cbb'], '문화': ['photo-1507842217343-583bb7270b66','photo-1579783902614-a3fb3927b6a5'], '식사': ['photo-1414235077428-338989a2e8c0','photo-1555939594-58d7cb561ad1'], '산책': ['photo-1441974231531-c6227db76b6e','photo-1519608487953-e999c86e7455'] };
+const photo = (p, cls = 'photo') => {
+  const choices = referencePhotos[p.category] || referencePhotos['산책'];
+  const hash = [...String(p.id)].reduce((n,c) => n+c.charCodeAt(0),0);
+  const image = p.photo || choices[hash % choices.length];
+  return '<img data-place-photo class="' + cls + '" src="https://images.unsplash.com/' + esc(image) + '?auto=format&fit=crop&w=900&q=80" alt="' + esc(p.category) + ' 분위기 참고 사진 · 실제 장소 사진 아님" loading="lazy" referrerpolicy="no-referrer">';
+};
 const btn = (action, text, ic = '', cls = '', extra = '') => `<button type="button" class="btn ${cls}" data-action="${action}" ${extra}>${ic ? icon(ic) : ''}${text}</button>`;
 const actionIcon = (action, ic, label, extra = '') => `<button type="button" class="icon-btn" data-action="${action}" aria-label="${esc(label)}" ${extra}>${icon(ic)}</button>`;
 const isSaved = course => state.saved.some(p => p.id === course.id);
@@ -46,11 +53,11 @@ function render() {
     <nav class="nav">${[['explore', 'compass', '탐색'], ['saved', 'heart', '저장한 코스'], ['profile', 'user', '마이페이지']].map(([id, i, label]) => `<button data-action="nav" data-tab="${id}" class="${state.tab === id ? 'active' : ''}" ${state.tab === id ? 'aria-current="page"' : ''}>${icon(i)}<span class="nav-label">${label}</span>${id === 'saved' && state.saved.length ? `<span class="count">${state.saved.length}</span>` : ''}</button>`).join('')}</nav>
     <div class="side-note">${icon('spark')}<br><strong>계획은 가볍게,<br>우리의 하루는 특별하게.</strong><p>좋아하는 것들로 채우는<br>둘만의 새로운 하루</p></div>
     <button class="side-profile" data-action="nav" data-tab="profile"><span class="avatar">${esc(name.slice(0, 1))}</span><div><strong>${esc(name)}님</strong><small>${state.profile ? '나만의 취향으로 탐색 중' : '게스트로 둘러보는 중'}</small></div></button></aside>
-    <div class="main-wrap"><header class="topbar"><div class="crumb">우리의 다음 목적지 <strong>/ &nbsp; ${state.tab === 'explore' ? '탐색' : state.tab === 'saved' ? '저장한 코스' : '마이페이지'}</strong></div><div class="mobile-brand">${brand}</div><div class="top-actions"><span class="small muted"><span class="status-dot"></span>새로운 하루의 시작</span>${!window.EodigajiNative ? btn('install-app', '앱 설치', '', 'ghost') : ''}${btn('about', '샘플 체험', '', 'ghost')}${state.user ? btn('logout', '로그아웃', '', 'logout-top') : state.config.auth && state.profile ? btn('auth-login', '로그인', '', 'outline') : ''}${btn(state.profile ? 'edit-profile' : 'onboard', state.profile ? `${esc(name)}님` : '로그인 · 회원가입', 'user', 'outline')}</div></header>
-    <main id="main" class="content">${state.tab === 'explore' ? explore() : state.tab === 'saved' ? savedPage() : profilePage()}</main></div></div>`;
+    <div class="main-wrap"><header class="topbar"><div class="crumb">우리의 다음 목적지 <strong>/ &nbsp; ${state.tab === 'explore' ? '탐색' : state.tab === 'saved' ? '저장한 코스' : '마이페이지'}</strong></div><div class="mobile-brand">${brand}</div><div class="top-actions"><span class="small muted"><span class="status-dot"></span>새로운 하루의 시작</span>${!installed() ? btn('install-app', '앱 설치', '', 'ghost') : ''}${btn('about', '샘플 체험', '', 'ghost')}${state.user ? btn('logout', '로그아웃', '', 'logout-top') : state.config.auth && state.profile ? btn('auth-login', '로그인', '', 'outline') : ''}${btn(state.profile ? 'edit-profile' : 'onboard', state.profile ? `${esc(name)}님` : '로그인 · 회원가입', 'user', 'outline')}</div></header>
+    <main id="main" class="content">${state.tab === 'explore' ? explore() : state.tab === 'course' ? coursePage() : state.tab === 'saved' ? savedPage() : profilePage()}</main></div></div>`;
   if (state.view === 'chat') { const messages = $('.messages'); if (messages) messages.scrollTop = messages.scrollHeight; }
-  if (state.tab === 'explore') {
-    $('.sample-foot').textContent = state.course?.demo ? `샘플 장소 코스 · ${state.config.ai ? '실제 AI 조건 분석' : '규칙 기반 대화 체험'} · 실제 지도·장소 연동은 상단 서비스 설정에서 확인하세요.` : '카카오 장소 검색 결과 · 비용·체류·이동 시간·실내외는 추정이며 검증된 영업 정보가 아닙니다. 지도 선은 방문 순서로 실제 길찾기가 아닙니다.';
+  if (state.tab === 'explore' || state.tab === 'course') {
+    const foot = $('.sample-foot'); if (foot) foot.textContent = state.course?.demo ? `샘플 장소 코스 · ${state.config.ai ? '실제 AI 조건 분석' : '규칙 기반 대화 체험'} · 실제 지도·장소 연동은 상단 서비스 설정에서 확인하세요.` : '카카오 장소 검색 결과 · 비용·체류·이동 시간·실내외는 추정이며 검증된 영업 정보가 아닙니다. 지도 선은 방문 순서로 실제 길찾기가 아닙니다.';
     if (!state.course?.demo) { const note = $('.map-legend p'); if (note) note.textContent = '실제 장소 위치 · 파란 선은 방문 순서 (길찾기 아님)'; const credit = $('.map-credit'); if (credit) credit.textContent = ''; }
     if (state.config.ai) { const sub = $('.chat-heading p'); if (sub) sub.textContent = `${state.config.aiProvider === 'gemini' ? 'Gemini' : 'OpenAI'} 연결 · 입력한 조건을 분석해요`; }
     refreshLiveMap();
@@ -71,9 +78,9 @@ function render() {
 }
 function refreshLiveMap() {
   const target = $('#real-map');
-  if (target && state.config.map) mountLiveMap(target, state.config.mapKey, filteredPlaces(), state.course?.places || [], id => placeDialog(id));
+  if (target && state.config.map) mountLiveMap(target, state.config.mapKey, state.courseChosen ? state.course?.places || [] : [], state.courseChosen ? state.course?.places || [] : [], id => placeDialog(id));
 }
-function acceptCourse(course) { state.course = course; state.conditions = course.conditions; if (course.availablePlaces) state.places = course.availablePlaces; }
+function acceptCourse(course) { state.courseChosen = false; state.mapExpanded = false; state.recommendations = course.recommendations || [course]; state.course = course; state.conditions = course.conditions; if (course.availablePlaces) state.places = course.availablePlaces; }
 function greeting(title, sub, eyebrow = 'MAKE ROOM FOR A LITTLE ADVENTURE') { return `<section class="greeting"><div><span class="eyebrow">${eyebrow}</span><h1>${title}</h1><p>${sub}</p></div><span class="date">${icon('calendar')}${esc(today.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' }))}</span></section>`; }
 function explore() {
   const c = state.conditions;
@@ -90,13 +97,18 @@ function courseCard(course, saved = false) {
     ${saved ? `<div class="saved-actions">${btn('course', '코스 다시 보기', 'arrow', 'primary', `data-id="${esc(course.id)}"`)}${actionIcon('remove-saved', 'trash', '저장한 코스 삭제', `data-id="${esc(course.id)}"`)}</div>` : btn('course', '우리의 코스 자세히 보기', 'arrow', 'primary full', `data-id="${esc(course.id)}"`)}</div></article>`;
 }
 function discovery() {
-  const list = filteredPlaces();
-  return `<section class="discovery"><div class="section-title"><h2>이런 하루, 어때요?</h2><small>선택한 조건을 담았어요</small></div>${state.course ? courseCard(state.course) : '<p>코스를 불러오는 중입니다.</p>'}<button class="ai-invite" data-action="view" data-view="chat">${icon('spark')}<div><strong>생각한 데이트가 따로 있나요?</strong><p>AI에게 말하고, 우리답게 바꿔 보세요.</p></div>${icon('chevron')}</button><div class="section-title"><h2>함께 들르기 좋은 곳</h2><small>${list.length}개의 ${state.config.places ? '검색된' : '샘플'} 장소</small></div><div class="place-list">${list.length ? list.slice(0, 4).map(miniPlace).join('') : '<p class="small muted" style="padding:20px 0">검색 결과가 없어요. 다른 검색어나 분류를 선택해 주세요.</p>'}</div></section>`;
+  const courses = state.recommendations.length ? state.recommendations : state.course ? [state.course] : [];
+  return '<section class="discovery"><div class="section-title"><h2>어떤 하루가 끌리세요?</h2><small>조건에 맞는 코스를 골라 주세요</small></div><div class="recommendations">' + courses.map((course, i) => '<article class="recommendation"><div class="recommendation-photo">' + photo(course.places[0]) + '</div><div class="recommendation-body"><span class="tag blue">' + esc(course.label || String.fromCharCode(65 + i)) + ' 코스</span><h3>' + esc(course.concept || course.title) + '</h3><p>' + course.places.map(p => esc(p.name)).join(' → ') + '</p><div class="course-stats"><span>' + length(course.minutes) + '</span><span>1인 예상 ' + won(course.totalCost) + '</span></div>' + btn('choose-course', '이 코스 선택', 'arrow', 'primary full', 'data-id="' + esc(course.id) + '"') + '</div></article>').join('') + '</div><button class="ai-invite" data-action="view" data-view="chat">' + icon('spark') + '<div><strong>다른 하루를 원하시나요?</strong><p>AI에게 취향을 알려 주세요.</p></div></button></section>';
+}
+function coursePage() {
+  const course = state.course;
+  if (!course) { state.tab = 'explore'; return explore(); }
+  return greeting(esc(course.concept || course.title), '선택한 장소와 방문 순서를 한눈에 확인하세요.', 'OUR DATE ROUTE') + '<div class="detail-actions">' + btn('other-courses', '다른 코스 선택', 'back', 'outline') + btn('save', isSaved(course) ? '저장 취소' : '코스 저장', 'heart', 'primary', 'data-id="' + esc(course.id) + '"') + btn('share', '공유', 'share', 'outline', 'data-id="' + esc(course.id) + '"') + '</div><div class="course-detail-grid"><section class="route-detail"><div class="detail-summary"><span>' + length(course.minutes) + '</span><span>1인 예상 ' + won(course.totalCost) + '</span><span>' + esc(course.conditions.start) + '–' + esc(course.end) + '</span></div><div class="timeline">' + course.places.map((p,i) => '<div class="stop"><time>' + esc(p.time) + '</time><span class="stop-number">' + (i+1) + '</span><div><button class="stop-place" data-action="place" data-id="' + esc(p.id) + '">' + photo(p) + '<span><h3>' + esc(p.name) + '</h3><p>' + esc(p.category) + ' · ' + p.stay + '분 · 예상 ' + won(p.cost) + '</p></span></button>' + (i < course.places.length - 1 ? '<p class="travel-note">' + esc(course.conditions.transport) + ' 약 ' + course.places[i+1].travel + '분' + (course.places[i+1].travelDistance != null ? ' · 거리 추정 ' + (course.places[i+1].travelDistance / 1000).toFixed(1) + 'km' : '') + ' · ' + esc(course.places[i+1].travelBasis || '이전 코스 추정치') + '</p>' : '') + '</div></div>').join('') + '</div></section>' + mapPanel() + '</div><p class="sample-foot">예상 일정 · 실제 길찾기와 영업 여부는 방문 전에 확인하세요.</p>';
 }
 function miniPlace(p) { return `<button class="mini-place" data-action="place" data-id="${esc(p.id)}"><span class="thumb">${photo(p)}</span><span><small>${esc(p.category)} · ${esc(p.region)}</small><h3>${esc(p.name)}</h3><p>${esc(p.environment)} · ${p.estimated ? '예상 ' : ''}${won(p.cost)}</p></span>${icon('chevron')}</button>`; }
 function filteredPlaces() { return state.places.filter(p => p.region === state.conditions.region && (state.filter === '전체' || p.category === state.filter) && `${p.name} ${p.category} ${p.description} ${p.region}`.includes(state.query)); }
 function mapPanel() {
-  return `<section class="map-panel" aria-label="${esc(state.conditions.region)} ${state.config.places ? '장소 지도' : '샘플 지도'}"><label class="map-search">${icon('search')}<input id="map-search" type="search" value="${esc(state.query)}" placeholder="조회된 장소 이름이나 분류로 검색" aria-label="현재 조회된 장소에서 검색"></label><div class="map-chips" role="group" aria-label="장소 분류">${['전체', '카페', '식사', '문화', '산책'].map(x => `<button data-action="category" data-category="${x}" class="${state.filter === x ? 'active' : ''}" aria-pressed="${state.filter === x}">${x}</button>`).join('')}</div><div id="map-render">${mapArt()}</div><div class="map-controls">${actionIcon('zoom-in', 'plus', '지도 확대')}${actionIcon('zoom-out', 'minus', '지도 축소')}${actionIcon('map-reset', 'target', '지도 원래 크기로')}</div><div class="map-legend"><div><strong class="row">${icon('pin')}${esc(state.conditions.region)}에서 만나는 우리의 하루</strong><p>${state.course?.places.length || 0}개의 장소 · 파란 선은 추천 코스 · 샘플 지도</p></div>${btn('course', '코스 보기', 'arrow', '', state.course ? `data-id="${esc(state.course.id)}"` : '')}</div><small class="map-credit">어디가지 베타 · 지리적 위치와 경로는 실제 지도와 다릅니다.</small></section>`;
+  return '<section class="map-panel ' + (state.mapExpanded ? 'map-expanded' : '') + '" aria-label="선택한 코스 지도"><div class="map-title"><strong>' + (state.courseChosen ? '선택한 코스 경로' : '코스를 선택해 주세요') + '</strong>' + btn('expand-map', state.mapExpanded ? '지도 작게 보기' : '지도 크게 보기', 'map', 'outline') + '</div><div id="map-render">' + (state.courseChosen ? mapArt() : '<div class="map-live-error">A·B·C 코스 중 원하는 하루를 고르면<br>그 코스의 장소와 순서만 표시합니다.</div>') + '</div><div class="map-controls">' + actionIcon('zoom-in','plus','지도 확대') + actionIcon('zoom-out','minus','지도 축소') + '</div><div class="map-legend"><div><strong>' + (state.courseChosen ? esc(state.conditions.region) + ' · ' + state.course.places.length + '곳' : '우리의 하루를 먼저 골라보세요') + '</strong><p>번호는 방문 순서 · 연결선은 실제 길찾기가 아닙니다</p></div></div></section>';
 }
 function mapArt() {
   if (state.course && !state.course.demo) return state.config.map ? '<div id="real-map" class="real-map" aria-label="카카오 지도"></div>' : '<div class="map-live-error">실제 장소를 검색했어요. 지도를 표시하려면 서비스 설정에서 카카오 JavaScript 키를 등록해 주세요.</div>';
@@ -106,7 +118,7 @@ function mapArt() {
   }
   const course = state.course?.places || [];
   const line = course.map((p, i) => `${i ? 'L' : 'M'} ${p.x * 10} ${p.y * 8}`).join(' ');
-  const visible = filteredPlaces();
+  const visible = course;
   return `<div class="map-art" style="transform:scale(${state.zoom})"><svg class="base-map" viewBox="0 0 1000 800" preserveAspectRatio="none" aria-hidden="true"><rect width="1000" height="800" fill="#f1f2ec"/><g transform="rotate(-13 500 400)">${blocks}<path d="M-100 312H1100M360-100V900" stroke="#d6dbd2" stroke-width="30"/><path d="M-100 312H1100M360-100V900" stroke="#fffefa" stroke-width="25"/><path d="M-100 600H1100M790-100V900" stroke="#fffefa" stroke-width="21"/><path d="M-100 314H1100" stroke="#d2c9b1" stroke-width="2" stroke-dasharray="9 8"/></g><path d="M-20 460Q135 460 164 550T370 830H-20Z" fill="#d4e1cb"/><path d="M-30 590Q90 480 150 650T325 830" fill="none" stroke="#eaf0df" stroke-width="14"/><path d="M670 800Q730 655 1030 625V830Z" fill="#cce2e7"/><path d="M650 800Q724 635 1030 607" fill="none" stroke="#e5edd9" stroke-width="24"/><text x="490" y="165" font-size="22" fill="#939e91" font-family="sans-serif" letter-spacing="6">${esc(state.conditions.region)}동</text><text x="70" y="655" font-size="15" fill="#8da480" font-family="sans-serif">동네 공원</text><text x="820" y="740" font-size="14" fill="#87a8b1" font-family="sans-serif">물빛 산책로</text><text x="390" y="620" font-size="12" fill="#a2aa9e" font-family="sans-serif" transform="rotate(-13 390 620)">연무장길 · 예시</text><path d="${line}" fill="none" stroke="#fff" stroke-width="9" stroke-linejoin="round"/><path d="${line}" fill="none" stroke="#476ce2" stroke-width="4" stroke-linecap="round" stroke-dasharray="5 8" stroke-linejoin="round"/></svg>
     ${visible.map(p => { const idx = course.findIndex(x => x.id === p.id); return `<button class="pin-button ${state.selected === p.id ? 'selected' : ''} ${idx === -1 ? 'alternative' : ''}" data-action="place" data-id="${p.id}" style="left:${p.x}%;top:${p.y}%" aria-label="${esc(p.name)} 장소 상세">${idx > -1 ? `<b>${idx + 1}</b>${esc(p.name)}` : icon(p.category === '카페' ? 'coffee' : 'pin')}</button>`; }).join('')}</div>${!visible.length ? '<div class="map-empty">검색 결과가 없어요. 검색어나 분류를 바꿔 주세요.</div>' : ''}`;
 }
@@ -133,7 +145,7 @@ function filtersDialog() {
   const c = state.conditions;
   openDialog('어떤 하루를 만들까요?', `<p>이번 데이트에 맞는 조건을 골라 주세요.<br>부담 없는 예산과 편안한 동선부터 시작해요.</p><form id="conditions-form"><div class="form-grid"><label class="field">희망 지역<input name="region" type="text" maxlength="60" value="${esc(c.region)}" placeholder="예: 부산 해운대, 수원 행궁동, 제주 애월" required></label>${selectField('purpose', '오늘의 목적', ['데이트', '여행'], c.purpose)}<label class="field">날짜<input name="date" type="date" value="${esc(c.date)}" required></label><label class="field">시작 시간<input name="start" type="time" value="${esc(c.start)}" required></label>${selectField('duration', '함께할 시간', [[120, '2시간'], [180, '3시간'], [240, '4시간'], [360, '6시간']], c.duration)}<label class="field">1인당 예산 (원)<input name="budget" type="number" min="0" max="1000000" step="500" value="${c.budget}" required></label>${selectField('mood', '선호 분위기', ['여유로운', '감성적인', '로맨틱한', '활동적인'], c.mood)}${selectField('transport', '이동수단', ['도보', '대중교통', '자동차'], c.transport)}${selectField('environment', '실내 · 실외', [['전체', '상관없어요'], '실내', '실외'], c.environment)}</div><div class="form-note">시·군·구나 동네 이름을 입력해 주세요. 실제 장소 검색은 국내 지역을 지원하며, 샘플 모드에서는 성수·연남·해방촌만 이용할 수 있어요. 영업 여부와 교통 상황은 반영되지 않습니다.</div><p id="form-error" class="form-error" role="alert"></p></form>`, `<button class="btn primary" type="submit" form="conditions-form">${icon('spark')}이 조건으로 코스 찾기</button>`);
 }
-function lookupCourse(id) { return [state.course, ...state.saved, ...state.messages.map(m => m.course)].find(c => c && c.id === id) || state.course; }
+function lookupCourse(id) { return [...state.recommendations, state.course, ...state.saved, ...state.messages.map(m => m.course)].find(c => c && c.id === id) || state.course; }
 function courseDialog(course) {
   if (!course) return;
   draftCourse = course;
@@ -267,13 +279,15 @@ document.addEventListener('click', async e => {
   if (action === 'filters') filtersDialog();
   if (action === 'category') { state.filter = target.dataset.category; render(); }
   if (['zoom-in', 'zoom-out', 'map-reset'].includes(action)) { if (state.course && !state.course.demo) { if (action === 'map-reset') refreshLiveMap(); else zoomLiveMap(action === 'zoom-in' ? -1 : 1); } else { state.zoom = action === 'map-reset' ? 1 : Math.max(1, Math.min(1.75, state.zoom + (action === 'zoom-in' ? .25 : -.25))); $('#map-render').innerHTML = mapArt(); } }
-  if (action === 'course') courseDialog(lookupCourse(id));
+  if (action === 'course' || action === 'choose-course') { const course = lookupCourse(id); if (course) { state.course = course; state.conditions = course.conditions; state.courseChosen = true; state.tab = 'course'; state.mapExpanded = false; closeDialog(); render(); window.scrollTo(0,0); } }
+  if (action === 'other-courses') { state.courseChosen = false; state.tab = 'explore'; state.mapExpanded = false; render(); window.scrollTo(0,0); }
+  if (action === 'expand-map') { state.mapExpanded = !state.mapExpanded; render(); }
   if (action === 'place') placeDialog(id, target.dataset.from === 'course');
-  if (action === 'back-course') courseDialog(draftCourse);
+  if (action === 'back-course') { closeDialog(); state.tab = 'course'; render(); }
   if (action === 'save' || action === 'save-detail') { const c = lookupCourse(id); target.disabled = true; await toggleSave(c); target.disabled = false; if (action === 'save-detail') courseDialog(c); }
   if (action === 'remove-saved') toggleSave(lookupCourse(id));
   if (action === 'share') await share(lookupCourse(id));
-  if (action === 'use-course' || action === 'chat-course') { const c = lookupCourse(id); acceptCourse(c); if (!c.demo && !c.availablePlaces) state.places = c.places; state.view = 'map'; state.tab = 'explore'; state.query = ''; state.filter = '전체'; closeDialog(); render(); window.scrollTo(0, 0); }
+  if (action === 'use-course' || action === 'chat-course') { const c = lookupCourse(id); acceptCourse(c); state.courseChosen = true; if (!c.demo && !c.availablePlaces) state.places = c.places; state.view = 'map'; state.tab = 'course'; state.query = ''; state.filter = '전체'; closeDialog(); render(); window.scrollTo(0, 0); }
   if (action === 'suggest') await sendChat(target.dataset.message);
   if (action === 'place-chat') { const p = state.places.find(p => p.id === id); closeDialog(); await sendChat(`${p.region}에서 ${p.environment}, ${p.mood === '여유로운' ? '조용한' : p.mood} ${state.conditions.purpose}`); }
   if (action === 'onboard') { draftProfile = {}; if (state.config.auth) authDialog('login'); else onboard(0); }
@@ -321,7 +335,7 @@ async function init() {
   const confirmation = new URLSearchParams(window.location.hash.slice(1));
   const returnedFromEmail = confirmation.has('access_token') || confirmation.has('error') || confirmation.has('error_code');
   if (returnedFromEmail) window.history.replaceState(null, '', window.location.pathname + window.location.search);
-  try { state.config = await api('/api/config'); [state.places, state.course] = await Promise.all([api('/api/places'), api('/api/plan', state.conditions)]); state.conditions = state.course.conditions;
+  try { state.config = await api('/api/config'); [state.places, state.course] = await Promise.all([api('/api/places'), api('/api/plan', state.conditions)]); acceptCourse(state.course);
     if (state.config.auth) {
       // 온라인 계정 모드에서는 브라우저의 체험 데이터를 회원 정보처럼 표시하지 않습니다.
       state.profile = null; state.saved = [];
@@ -355,7 +369,7 @@ function connectionsDialog() {
 }
 function authDialog(mode) {
   const signup = mode === 'signup';
-  openDialog(signup ? '회원가입' : '로그인', `<p>이메일 계정으로 코스와 취향을 저장하세요.</p><form id="auth-form"><input type="hidden" name="mode" value="${mode}"><div class="stack"><label class="field">이메일<input type="email" name="email" required maxlength="254" autocomplete="email"></label><label class="field">비밀번호<input type="password" name="password" required minlength="8" maxlength="128" autocomplete="${signup ? 'new-password' : 'current-password'}"></label></div><div class="form-note">${signup ? '이메일과 비밀번호로 가입하고 바로 로그인하세요. 비밀번호는 브라우저 저장 공간에 보관하지 않습니다.' : 'Supabase에서 계정을 인증합니다. 비밀번호는 브라우저 저장 공간에 보관하지 않습니다.'}</div><p id="auth-error" class="form-error" role="alert"></p></form>`, `${btn(signup ? 'auth-login' : 'auth-signup', signup ? '로그인으로' : '회원가입', '', 'outline')}<button class="btn primary" type="submit" form="auth-form">${signup ? '가입하기' : '로그인'}</button>`);
+  openDialog(signup ? '회원가입' : '로그인', `<p>이메일 계정으로 코스와 취향을 저장하세요.</p><form id="auth-form"><input type="hidden" name="mode" value="${mode}"><div class="stack"><label class="field">이메일<input type="email" name="email" required maxlength="254" autocomplete="email"></label><label class="field">비밀번호<input type="password" name="password" required minlength="8" maxlength="128" autocomplete="${signup ? 'new-password' : 'current-password'}"></label></div><div class="form-note">${signup ? '가입 후 인증 이메일을 확인한 다음 로그인해 주세요. 비밀번호는 브라우저 저장 공간에 보관하지 않습니다.' : 'Supabase에서 계정을 인증합니다. 비밀번호는 브라우저 저장 공간에 보관하지 않습니다.'}</div><p id="auth-error" class="form-error" role="alert"></p></form>`, `${btn(signup ? 'auth-login' : 'auth-signup', signup ? '로그인으로' : '회원가입', '', 'outline')}<button class="btn primary" type="submit" form="auth-form">${signup ? '가입하기' : '로그인'}</button>`);
 }
 async function loadAccount() {
   const data = await api('/api/account'); state.profile = data.profile; state.saved = data.saved;
@@ -364,7 +378,7 @@ document.addEventListener('submit', async e => {
   if (e.target.id !== 'auth-form') return; e.preventDefault();
   const data = new FormData(e.target); const submit = dialog.querySelector('[type=submit]'); submit.disabled = true;
   try {
-    const result = await api(`/api/auth/${data.get('mode')}`, { email: data.get('email'), password: data.get('password') });
+    const result = await api(`/api/auth/${data.get('mode')}`, { email: data.get('email').trim(), password: data.get('password') });
     e.target.reset();
     if (!result.user) { $('#auth-error').textContent = result.message; return; }
     state.user = result.user; state.profile = null; state.saved = [];
@@ -386,4 +400,7 @@ window.addEventListener('eodigaji:back', () => {
   openDialog('앱을 종료할까요?', '<p>저장한 코스는 다음에 앱을 열어도 그대로 남아 있어요.</p>', `${btn('close', '계속 둘러보기', '', 'outline')}<button class="btn primary" id="exit-app">종료</button>`);
   $('#exit-app').addEventListener('click', () => window.EodigajiNative?.exit());
 });
+
+window.addEventListener('appinstalled', () => { window.eodigajiInstalled = true; document.querySelector('[data-action="install-app"]')?.remove(); });
+window.matchMedia?.('(display-mode: standalone)')?.addEventListener?.('change', () => render());
 init();
