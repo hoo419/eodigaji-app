@@ -35,7 +35,7 @@ async function api(path, body) {
   finally { clearTimeout(timeout); }
 }
 const installed = () => !!window.EodigajiNative || window.eodigajiInstalled === true || window.matchMedia?.('(display-mode: standalone)')?.matches || navigator.standalone === true;
-const brand = '<span class="brand">어디가지<span class="beta">베타</span></span>';
+const brand = '<span class="brand brand-image" aria-label="어디가지 베타"><span class="brand-art"><img src="./brand-logo.jpg" alt="어디가지" width="1024" height="1024"></span><span class="beta">베타</span></span>';
 const referencePhotos = { '카페': ['photo-1442512595331-e89e73853f31','photo-1501339847302-ac426a4a7cbb'], '문화': ['photo-1507842217343-583bb7270b66','photo-1579783902614-a3fb3927b6a5'], '식사': ['photo-1414235077428-338989a2e8c0','photo-1555939594-58d7cb561ad1'], '산책': ['photo-1441974231531-c6227db76b6e','photo-1519608487953-e999c86e7455'] };
 const photo = (p, cls = 'photo') => {
   const choices = referencePhotos[p.category] || referencePhotos['산책'];
@@ -57,7 +57,7 @@ function render() {
     <main id="main" class="content">${state.tab === 'explore' ? explore() : state.tab === 'course' ? coursePage() : state.tab === 'saved' ? savedPage() : profilePage()}</main></div></div>`;
   if (state.view === 'chat') { const messages = $('.messages'); if (messages) messages.scrollTop = messages.scrollHeight; }
   if (state.tab === 'explore' || state.tab === 'course') {
-    const foot = $('.sample-foot'); if (foot) foot.textContent = state.course?.demo ? `샘플 장소 코스 · ${state.config.ai ? '실제 AI 조건 분석' : '규칙 기반 대화 체험'} · 실제 지도·장소 연동은 상단 서비스 설정에서 확인하세요.` : '카카오 장소 검색 결과 · 비용·체류·이동 시간·실내외는 추정이며 검증된 영업 정보가 아닙니다. 지도 선은 방문 순서로 실제 길찾기가 아닙니다.';
+    const foot = $('.sample-foot'); if (foot) foot.textContent = state.course?.demo ? `샘플 장소 코스 · ${state.config.ai ? '실제 AI 조건 분석' : '규칙 기반 대화 체험'} · 실제 지도·장소 연동은 상단 서비스 설정에서 확인하세요.` : '카카오 장소 검색 결과 · 비용·체류·이동 시간·실내외는 추정이며 검증된 영업 정보가 아닙니다. 경로 조회 성공 시 실제 경로를 표시하며, 조회 전·실패 시 점선은 방문 순서만 나타냅니다.';
     if (!state.course?.demo) { const credit = $('.map-credit'); if (credit) credit.textContent = ''; }
     if (state.config.ai) { const sub = $('.chat-heading p'); if (sub) sub.textContent = `${state.config.aiProvider === 'gemini' ? 'Gemini' : 'OpenAI'} 연결 · 입력한 조건을 분석해요`; }
     refreshLiveMap();
@@ -175,7 +175,7 @@ function courseDialog(course) {
   openDialog('우리의 하루', `<div class="detail-hero" style="border-radius:13px;overflow:hidden">${photo(course.places[0])}<span class="photo-caption">분위기 참고 이미지</span></div><div class="row" style="margin-top:20px"><span class="tag blue">${esc(course.conditions.region)}</span><span class="tag">${esc(course.conditions.purpose)}</span><span class="tag">샘플 코스</span></div><h3 class="detail-title">${esc(course.title)}</h3><p>${esc(course.conditions.date || dateISO)} · ${esc(course.conditions.start)}–${esc(course.end)}</p><div class="detail-summary"><span>${icon('clock')}${length(course.minutes)}</span><span>${icon('wallet')}1인 ${won(course.totalCost)}</span><span>${icon('walk')}${esc(course.conditions.transport)}</span></div><div class="timeline">${course.places.map((p, i) => `<div class="stop"><time>${p.time}</time><span class="stop-number">${i + 1}</span><div><button class="stop-place" data-action="place" data-id="${p.id}" data-from="course">${photo(p)}<span><span class="small muted">${esc(p.category)} · ${p.stay}분</span><h3>${esc(p.name)}</h3><p>${won(p.cost)} · ${esc(p.environment)}</p></span></button>${i < course.places.length - 1 ? `<p class="travel-note">${icon('walk')} ${esc(course.conditions.transport)} 약 ${course.places[i + 1].travel}분 · 예시</p>` : ''}</div></div>`).join('')}</div><div class="form-note">장소·영업시간·이동 시간·비용은 샘플입니다. 실제 장소 데이터와 경로 최적화는 아직 연결되지 않았습니다.</div>`, `${btn('save-detail', isSaved(course) ? '저장 취소' : '코스 저장', 'heart', 'primary', `data-id="${course.id}"`)}${btn('share', '공유', 'share', 'outline', `data-id="${course.id}"`)}${btn('use-course', '지도', 'map', 'outline', `data-id="${course.id}"`)}`);
   if (!course.demo) {
     dialog.querySelector('.dialog-body>.row .tag:last-child').textContent = '실제 장소 · 추정 일정';
-    dialog.querySelector('.form-note').textContent = '카카오에서 검색한 실제 장소입니다. 비용·실내외·체류·이동 시간은 분류별 추정값으로 실제 영업 여부·가격·교통은 각 장소에서 확인해 주세요. 지도 선은 방문 순서만 표시합니다.';
+    dialog.querySelector('.form-note').textContent = '카카오에서 검색한 실제 장소입니다. 비용·실내외·체류·이동 시간은 분류별 추정값으로 실제 영업 여부·가격·교통은 각 장소에서 확인해 주세요. 지도 경로 조회 상태를 확인하고 최신 교통 정보는 길찾기에서 확인해 주세요.';
   }
 }
 function placeDialog(id, fromCourse = false) {

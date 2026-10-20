@@ -1,4 +1,6 @@
-# 어디가지 베타 mobile prototype
+# 어디가지 베타 초기 프로토타입 설계 기록
+
+> 초기 디자인의 역사적 기록입니다. 현재 디자인과 실제 서비스 기준은 [통합 설계서](../../설계서.md)와 [최신 계획](../plans/2026-10-20-current.md)을 따릅니다. 2026-10-20부터 노란 로고·테마와 sticky 지도를 적용했으며 아래의 파란 테마·데모 전용 설명은 초기 상태입니다.
 
 The user named the app 어디가지 베타 during implementation. The historical filename is retained; product branding uses only the requested name.
 

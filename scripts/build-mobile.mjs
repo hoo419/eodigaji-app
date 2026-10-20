@@ -11,7 +11,7 @@ validateServerUrl(config.apiBase);
 await mkdir(outdir, { recursive: true });
 await build({ entryPoints: [resolve(root, 'mobile/entry.js')], outfile: resolve(outdir, 'app.js'), bundle: true, format: 'iife', platform: 'browser', target: ['chrome100'], minify: true, legalComments: 'eof' });
 let html = await readFile(resolve(root, 'public/index.html'), 'utf8');
-html = html.replace('type="module" src="/app.js"', 'defer src="./app.js"').replace('href="/styles.css"', 'href="./styles.css"').replace('href="/favicon.svg"', 'href="./favicon.svg"');
+html = html.replace('type="module" src="/app.js"', 'defer src="./app.js"').replace('href="/styles.css"', 'href="./styles.css"').replaceAll('href="/brand-logo.jpg"', 'href="./brand-logo.jpg"');
 // Native bundles do not request web-only installation assets.
 html = html.replace(/<link rel="manifest"[^>]*>/g, '').replace(/<link rel="apple-touch-icon"[^>]*>/g, '').replace(/<script type="module" src="\/pwa.js"><\/script>/g, '');
 await writeFile(resolve(outdir, 'index.html'), html);
@@ -20,3 +20,5 @@ css = css.replace(/^@import url\([^\n]+\);\r?\n/, '');
 await writeFile(resolve(outdir, 'styles.css'), css);
 await copyFile(resolve(root, 'public/favicon.svg'), resolve(outdir, 'favicon.svg'));
 console.log(`Mobile assets built: ${outdir}\nMode: ${config.apiBase ? 'HTTPS server' : 'offline sample (no PC server required)'}`);
+
+await copyFile(resolve(root, 'public/brand-logo.jpg'), resolve(outdir, 'brand-logo.jpg'));

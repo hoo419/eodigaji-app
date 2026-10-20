@@ -11,6 +11,7 @@ import { createRouting } from './lib/routing.mjs';
 
 const publicDir = fileURLToPath(new URL('./public/', import.meta.url));
 const assets = { '/': ['index.html', 'text/html'], '/index.html': ['index.html', 'text/html'], '/styles.css': ['styles.css', 'text/css'], '/app.js': ['app.js', 'text/javascript'], '/icons.js': ['icons.js', 'text/javascript'], '/favicon.svg': ['favicon.svg', 'image/svg+xml'] };
+assets['/brand-logo.jpg'] = ['brand-logo.jpg', 'image/jpeg'];
 assets['/live-map.js'] = ['live-map.js', 'text/javascript'];
 for (const [file, type] of [['manifest.webmanifest', 'application/manifest+json'], ['sw.js', 'text/javascript'], ['pwa.js', 'text/javascript'], ['offline.html', 'text/html'], ['icon-192.png', 'image/png'], ['icon-512.png', 'image/png']]) assets[`/${file}`] = [file, type];
 function json(res, status, value) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); }

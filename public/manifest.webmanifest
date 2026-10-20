@@ -1,1 +1,20 @@
-{"id":"/","name":"어디가지 베타","short_name":"어디가지","lang":"ko","start_url":"/","scope":"/","display":"standalone","background_color":"#f7f8fa","theme_color":"#3159df","description":"대화로 찾는 우리만의 데이트와 여행 코스","icons":[{"src":"/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},{"src":"/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}]}
+{
+  "id": "/",
+  "name": "어디가지 베타",
+  "short_name": "어디가지",
+  "lang": "ko",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f8fa",
+  "theme_color": "#ffdf00",
+  "description": "대화로 찾는 우리만의 데이트와 여행 코스",
+  "icons": [
+    {
+      "src": "/brand-logo.jpg",
+      "sizes": "1024x1024",
+      "type": "image/jpeg",
+      "purpose": "any"
+    }
+  ]
+}
