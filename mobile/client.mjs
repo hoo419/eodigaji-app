@@ -15,7 +15,7 @@ export function createMobileClient({ apiBase = '', request } = {}) {
     // 서버 연결 실패를 샘플 성공으로 바꾸지 않고 오류를 그대로 화면에 알립니다.
     if (base) {
       let response;
-      try { response = await request({ url: base + path, method: body === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { data: body }), connectTimeout: 15000, readTimeout: 45000 }); }
+      try { response = await request({ url: base + path, method: body === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { data: body }), connectTimeout: 15000, readTimeout: path === '/api/chat' ? 90000 : 45000 }); }
       catch { throw new Error('서버에 연결하지 못했어요. 인터넷 연결과 서버 주소를 확인해 주세요.'); }
       let data = response.data;
       if (typeof data === 'string') { try { data = JSON.parse(data); } catch { throw new Error('서버 응답을 읽지 못했어요.'); } }

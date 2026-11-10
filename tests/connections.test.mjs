@@ -74,6 +74,9 @@ test('Gemini uses header authentication and validates generated conditions', asy
   assert.equal(result.conditions.environment, '실내');
   assert.equal(observed.options.headers['x-goog-api-key'], 'gemini-secret');
   assert.ok(!observed.url.includes('gemini-secret'));
+  const config = JSON.parse(observed.options.body).generationConfig;
+  assert.equal(config.thinkingConfig.thinkingLevel, 'LOW');
+  assert.equal(config.maxOutputTokens, 8192);
 });
 test('Supabase secret keys cannot be used as public anon credentials', async () => {
   const api = createConnections({ SUPABASE_URL: 'https://example.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'sb_secret_do-not-use' }, async () => { throw new Error('network must not run'); });

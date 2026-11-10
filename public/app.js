@@ -35,7 +35,7 @@ function toast(message) { clearTimeout(toastTimer); $('#toast').textContent = me
 async function api(path, body) {
   if (window.EodigajiNative) return window.EodigajiNative.request(path, body);
   const requestOwner = state.user?.id, requestGeneration = accountGeneration;
-  const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 45000);
+  const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), path === '/api/chat' ? 90000 : 45000);
   try {
     const res = await fetch(path, body === undefined ? { signal: controller.signal } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
     const data = await res.json();
@@ -416,7 +416,7 @@ document.addEventListener('submit', async e => {
     const submit = dialog.querySelector('[type="submit"]'); submit.disabled = true; submit.textContent = '코스를 찾고 있어요…';
     try { const course = await api('/api/plan', { ...conditions, excludePlaceIds: state.seenPlaceIds }); acceptCourse(course); state.query = ''; state.filter = '전체'; state.selected = null; state.tab = 'explore'; closeDialog(); render(); toast('선택한 조건으로 코스를 준비했어요.'); }
     catch (err) { if ($('#form-error')) $('#form-error').textContent = err.message; }
-    finally { state.busy = false; if (submit.isConnected) { submit.disabled = false; submit.innerHTML = `${icon('spark')}이 조건으로 코스 찾기`; } }
+    finally { state.busy = false; render(); if (submit.isConnected) { submit.disabled = false; submit.innerHTML = `${icon('spark')}이 조건으로 코스 찾기`; } }
   }
 });
 async function init() {
