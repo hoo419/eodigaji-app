@@ -1,0 +1,35 @@
+import { createRequire } from 'node:module';
+import assert from 'node:assert/strict';
+import { createApp } from '../server.mjs';
+import { memoryConnections } from './helpers/memory-connections.mjs';
+const require = createRequire(import.meta.url);
+const { chromium } = require(`${process.env.USERPROFILE}/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright`);
+const catalogue = ['카페','식사','문화','산책'].flatMap((category, g) => Array.from({length: 20}, (_, i) => ({id:`test-${g}-${i}`, name:category + ' 장소 ' + i, category, region:'성수', environment:category==='산책'?'실외':'실내', cost:1000, stay:20, mood:'여유로운', demo:true, x:20+i,y:30+i})));
+const connections = { ...memoryConnections(), publicConfig: () => ({ai:false,auth:true,places:true,map:false}), searchPlaces: async () => catalogue };
+const server = createApp({env:{APP_ORIGIN:'http://127.0.0.1:4199'}, connections}); await new Promise(r=>server.listen(4199,'127.0.0.1',r));
+const base='http://127.0.0.1:4199'; const post=(path,body,cookie)=>fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json',...(cookie?{Cookie:cookie}:{})},body:JSON.stringify(body)});
+const login=await post('/api/auth/login',{email:'feedback@example.com',password:'12345678'}); const cookie=login.headers.get('set-cookie').split(';')[0]; await post('/api/profile',{profile:{name:'피드백 테스트'}},cookie);
+const browser=await chromium.launch({headless:true,channel:'msedge'});
+try {
+ const context=await browser.newContext({viewport:{width:1440,height:1000}}); await context.route(/https:\/\//,route=>route.abort());
+ const page=await context.newPage(); const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(base);await page.locator('dialog[open] #auth-form').waitFor();await page.locator('[name=email]').fill('feedback@example.com');await page.locator('[name=password]').fill('12345678');await page.locator('[form=auth-form]').click();await page.locator('.recommendations').waitFor();
+ const first=await page.locator('.recommendation-body>p').allTextContents();
+ await page.getByRole('button',{name:'다른 코스 추천',exact:true}).click();await page.getByText('이전 장소를 제외한 새 코스를 준비했어요.').waitFor();
+ const second=await page.locator('.recommendation-body>p').allTextContents();
+ const names=first.flatMap(s=>s.split(' → '));assert.ok(second.every(s=>s.split(' → ').every(n=>!names.includes(n))));
+ await page.getByRole('button',{name:'AI와 계획하기',exact:true}).click();
+ await page.locator('#chat-input').fill('카페만 찾아줘');await page.locator('#chat-form').evaluate(form=>form.requestSubmit());
+ await page.locator('.constraint-note').filter({hasText:'카페만 추천'}).waitFor();
+ assert.ok(await page.locator('.constraint-note').innerText().then(s=>s.includes('카페만 추천')));
+ const reply=await page.locator('.chat-route').last().innerText();assert.equal(reply.includes('식사'),false);
+ await page.locator('#chat-input').fill('예산은 3만원으로');await page.locator('#chat-form').evaluate(form=>form.requestSubmit());
+ await page.locator('#chat-input').waitFor({state:'visible'}); await page.waitForFunction(() => !document.querySelector('#chat-input').disabled);assert.ok(await page.locator('.constraint-note').innerText().then(s=>s.includes('카페만 추천')));
+ await page.locator('[data-action=chat-course]').last().click();await page.locator('.course-detail-grid').waitFor();
+ await page.getByRole('button',{name:'코스 저장',exact:true}).click();
+ await page.locator('[data-action=nav][data-tab=saved]').click();assert.equal(await page.locator('.saved-state').count(),1);
+ await page.getByRole('button',{name:'저장됨',exact:true}).click();assert.equal(await page.locator('.saved-grid .course-card').count(),1);
+ await page.screenshot({path:'artifacts/saved-heart-feedback.png',fullPage:true});
+ await page.getByRole('button',{name:'저장한 코스 삭제',exact:true}).click();await page.locator('.empty-state').waitFor();
+ assert.deepEqual(errors,[]);console.log('PASS: new-place refresh, cafe-only chat, persistent constraints, clear saved heart, heart keeps course, trash deletes');
+} finally {await browser.close();await new Promise(r=>server.close(r));}

@@ -1,5 +1,6 @@
 import { icon } from './icons.js';
 import { mountLiveMap, zoomLiveMap } from './live-map.js';
+import { readSharedCourse } from './course-share.js';
 
 const $ = s => document.querySelector(s);
 // 사용자 입력·외부 문자열을 HTML 템플릿에 넣을 때 태그로 실행되지 않도록 이스케이프합니다.
@@ -12,54 +13,76 @@ function stored(key, fallback) { try { return JSON.parse(localStorage.getItem(`e
 const readProfile = stored('profile', null);
 const readSaved = stored('saved', []);
 // 화면 상태의 중심입니다. 상태를 바꾼 뒤 render()를 호출해 해당 화면을 다시 그립니다.
+const defaultConditions = () => ({ region: '성수', purpose: '데이트', budget: 50000, duration: 240, start: '14:00', date: dateISO, environment: '전체', mood: '여유로운', transport: '도보' });
 const state = {
   config: { ai: false, places: false, map: false, auth: false }, user: null,
   tab: 'explore', view: 'map', filter: '전체', query: '', zoom: 1, places: [], course: null, selected: null, recommendations: [], courseChosen: false, mapExpanded: false, routeMode: null, routeDetails: null, routeBusy: false,
-  profile: readProfile && typeof readProfile.name === 'string' ? readProfile : null,
-  saved: Array.isArray(readSaved) ? readSaved.filter(c => c && typeof c.id === 'string' && Array.isArray(c.places) && c.conditions) : [],
-  conditions: { region: '성수', purpose: '데이트', budget: 50000, duration: 240, start: '14:00', date: dateISO, environment: '전체', mood: '여유로운', transport: '도보' },
+  profile: null, shared: false, editor: null,
+  saved: [], seenPlaceIds: [], planningMemory: {}, previousPlan: null,
+  conditions: defaultConditions(),
   messages: [{ role: 'assistant', text: '안녕하세요! 오늘은 어떤 하루를 보내고 싶으세요?\n\n“성수에서 조용한 실내 데이트, 1인 3만원”처럼 말해 주세요. 함께 코스를 만들어 볼게요.' }],
   chatting: false, busy: false,
 };
-let modalReturn = null, draftProfile = {}, draftCourse = null, toastTimer;
+let modalReturn = null, draftProfile = {}, draftCourse = null, toastTimer, loginDialogLocked = false, accountGeneration = 0;
+function clearPrivateState() {
+  accountGeneration++; accountLoaded = false; lastWorkspace = ''; clearTimeout(workspaceTimer);
+  Object.assign(state, { user: null, profile: null, saved: [], course: null, places: [], messages: [], recommendations: [], editor: null, routeDetails: null, seenPlaceIds: [], planningMemory: {}, previousPlan: null, conditions: defaultConditions(), tab: 'explore', view: 'map', filter: '전체', query: '', zoom: 1, selected: null, courseChosen: false, mapExpanded: false, routeMode: null, routeBusy: false, chatting: false, busy: false });
+  draftProfile = {}; draftCourse = null;
+}
 function persist(key, value) { try { localStorage.setItem(`eodigaji.${key}`, JSON.stringify(value)); return true; } catch { toast('브라우저 저장 공간을 사용할 수 없어 이번 화면에서만 유지됩니다.'); return false; } }
 function toast(message) { clearTimeout(toastTimer); $('#toast').textContent = message; $('#toast').classList.add('show'); toastTimer = setTimeout(() => $('#toast').classList.remove('show'), 4000); }
 // Android에서는 모바일 연결 계층, 웹에서는 현재 서버의 HTTP API로 요청을 보냅니다.
 async function api(path, body) {
   if (window.EodigajiNative) return window.EodigajiNative.request(path, body);
+  const requestOwner = state.user?.id, requestGeneration = accountGeneration;
   const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 45000);
   try {
     const res = await fetch(path, body === undefined ? { signal: controller.signal } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
-    const data = await res.json(); if (!res.ok) throw new Error(data.error || '요청을 처리하지 못했어요.'); return data;
+    const data = await res.json();
+    if (requestOwner && (state.user?.id !== requestOwner || accountGeneration !== requestGeneration)) throw new Error('계정이 변경되어 이전 요청 결과를 사용하지 않았어요.');
+    if (res.status === 401 && state.user && !state.shared) {
+      clearPrivateState();
+      closeDialog(); render();
+    }
+    if (!res.ok) throw new Error(data.error || '요청을 처리하지 못했어요.'); return data;
   } catch (e) { if (e.name === 'AbortError' || e instanceof TypeError) throw new Error('서버에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.'); throw e; }
   finally { clearTimeout(timeout); }
 }
 const installed = () => !!window.EodigajiNative || window.eodigajiInstalled === true || window.matchMedia?.('(display-mode: standalone)')?.matches || navigator.standalone === true;
-const brand = '<span class="brand brand-image" aria-label="어디가지 베타"><span class="brand-art"><img src="./brand-logo.jpg" alt="어디가지" width="1024" height="1024"></span><span class="beta">베타</span></span>';
+const brand = '<button type="button" data-action="home" class="brand brand-image" aria-label="어디가지 홈"><span class="brand-art"><img src="./brand-logo.jpg" alt="어디가지" width="1024" height="1024"></span><span class="beta">베타</span></button>';
 const referencePhotos = { '카페': ['photo-1442512595331-e89e73853f31','photo-1501339847302-ac426a4a7cbb'], '문화': ['photo-1507842217343-583bb7270b66','photo-1579783902614-a3fb3927b6a5'], '식사': ['photo-1414235077428-338989a2e8c0','photo-1555939594-58d7cb561ad1'], '산책': ['photo-1441974231531-c6227db76b6e','photo-1519608487953-e999c86e7455'] };
 const photo = (p, cls = 'photo') => {
   const choices = referencePhotos[p.category] || referencePhotos['산책'];
   const hash = [...String(p.id)].reduce((n,c) => n+c.charCodeAt(0),0);
+  if (typeof p.photoUrl === 'string' && /^https:\/\//.test(p.photoUrl)) return '<img data-place-photo data-real-photo class="' + cls + '" src="' + esc(p.photoUrl) + '" alt="' + esc(p.name) + ' 실제 장소 사진" loading="lazy" referrerpolicy="no-referrer">';
   const image = p.photo || choices[hash % choices.length];
   return '<img data-place-photo class="' + cls + '" src="https://images.unsplash.com/' + esc(image) + '?auto=format&fit=crop&w=900&q=80" alt="' + esc(p.category) + ' 분위기 참고 사진 · 실제 장소 사진 아님" loading="lazy" referrerpolicy="no-referrer">';
 };
 const btn = (action, text, ic = '', cls = '', extra = '') => `<button type="button" class="btn ${cls}" data-action="${action}" ${extra}>${ic ? icon(ic) : ''}${text}</button>`;
 const actionIcon = (action, ic, label, extra = '') => `<button type="button" class="icon-btn" data-action="${action}" aria-label="${esc(label)}" ${extra}>${icon(ic)}</button>`;
+const hasSavedChanges = course => state.saved.some(c => c.id === course.id && (c.revision || 0) !== (course.revision || 0));
 const isSaved = course => state.saved.some(p => p.id === course.id);
 
 function render() {
+  if (!state.user && !state.shared) {
+    $('#app').innerHTML = `<div class="login-gate">${brand}<p class="eyebrow">A DAY, JUST FOR US</p><h1>우리의 다음 하루,<br>어디가지?</h1><p>로그인하고 나만의 코스와 취향을 보관하세요.<br>다시 로그인하면 계획하던 하루가 그대로 기다려요.</p>${!state.config.auth ? '<p class="form-note">계정 서비스 연결이 필요합니다. 관리자에게 문의해 주세요.</p>' : ''}</div>`;
+    if (!dialog.open || !$('#auth-form')) authDialog('login');
+    return;
+  }
+  if (state.shared) { $('#app').innerHTML = `<div class="shared-layout"><header>${brand}<span class="tag">공유 · 읽기 전용</span></header><main class="content">${sharedPage(state.course)}</main></div>`; return; }
+  scheduleWorkspace();
   const name = state.profile?.name || '여행자';
   $('#app').innerHTML = `<div class="shell"><aside class="sidebar" aria-label="주 메뉴">${brand}<div class="brand-note">A DAY, JUST FOR US</div>
     <nav class="nav">${[['explore', 'compass', '탐색'], ['saved', 'heart', '저장한 코스'], ['profile', 'user', '마이페이지']].map(([id, i, label]) => `<button data-action="nav" data-tab="${id}" class="${state.tab === id ? 'active' : ''}" ${state.tab === id ? 'aria-current="page"' : ''}>${icon(i)}<span class="nav-label">${label}</span>${id === 'saved' && state.saved.length ? `<span class="count">${state.saved.length}</span>` : ''}</button>`).join('')}</nav>
     <div class="side-note">${icon('spark')}<br><strong>계획은 가볍게,<br>우리의 하루는 특별하게.</strong><p>좋아하는 것들로 채우는<br>둘만의 새로운 하루</p></div>
     <button class="side-profile" data-action="nav" data-tab="profile"><span class="avatar">${esc(name.slice(0, 1))}</span><div><strong>${esc(name)}님</strong><small>${state.profile ? '나만의 취향으로 탐색 중' : '게스트로 둘러보는 중'}</small></div></button></aside>
     <div class="main-wrap"><header class="topbar"><div class="crumb">우리의 다음 목적지 <strong>/ &nbsp; ${state.tab === 'explore' ? '탐색' : state.tab === 'saved' ? '저장한 코스' : state.tab === 'course' ? '선택한 코스' : '마이페이지'}</strong></div><div class="mobile-brand">${brand}</div><div class="top-actions"><span class="small muted"><span class="status-dot"></span>새로운 하루의 시작</span>${!installed() ? btn('install-app', '앱 설치', '', 'ghost') : ''}${btn('about', '샘플 체험', '', 'ghost')}${state.user ? btn('logout', '로그아웃', '', 'logout-top') : state.config.auth && state.profile ? btn('auth-login', '로그인', '', 'outline') : ''}${btn(state.profile ? 'edit-profile' : 'onboard', state.profile ? `${esc(name)}님` : '로그인 · 회원가입', 'user', 'outline')}</div></header>
-    <main id="main" class="content">${state.tab === 'explore' ? explore() : state.tab === 'course' ? coursePage() : state.tab === 'saved' ? savedPage() : profilePage()}</main></div></div>`;
+    <main id="main" class="content">${state.tab === 'explore' ? explore() : state.tab === 'course' ? (state.editor ? editorPage() : coursePage()) : state.tab === 'saved' ? savedPage() : profilePage()}</main></div></div>`;
   if (state.view === 'chat') { const messages = $('.messages'); if (messages) messages.scrollTop = messages.scrollHeight; }
   if (state.tab === 'explore' || state.tab === 'course') {
     const foot = $('.sample-foot'); if (foot) foot.textContent = state.course?.demo ? `샘플 장소 코스 · ${state.config.ai ? '실제 AI 조건 분석' : '규칙 기반 대화 체험'} · 실제 지도·장소 연동은 상단 서비스 설정에서 확인하세요.` : '카카오 장소 검색 결과 · 비용·체류·이동 시간·실내외는 추정이며 검증된 영업 정보가 아닙니다. 경로 조회 성공 시 실제 경로를 표시하며, 조회 전·실패 시 점선은 방문 순서만 나타냅니다.';
     if (!state.course?.demo) { const credit = $('.map-credit'); if (credit) credit.textContent = ''; }
-    if (state.config.ai) { const sub = $('.chat-heading p'); if (sub) sub.textContent = `${state.config.aiProvider === 'gemini' ? 'Gemini' : 'OpenAI'} 연결 · 입력한 조건을 분석해요`; }
+    if (state.config.ai) { const sub = $('.chat-heading p'); if (sub) sub.textContent = `${state.config.aiProvider === 'gemini' ? 'Gemini' : 'OpenAI'} ${state.config.aiModel || ''} 연결 · 현재 코스를 함께 수정해요`; }
     refreshLiveMap();
   }
   const connectionButton = $('[data-action="about"]'); if (connectionButton) { connectionButton.dataset.action = 'connections'; connectionButton.textContent = '서비스 설정'; }
@@ -68,8 +91,8 @@ function render() {
     const profileText = $('.profile-card>p'); if (profileText && !state.user) profileText.textContent = '이 앱에 저장된 체험 프로필입니다.';
   }
   if (state.user && state.tab === 'profile') {
-    $('.profile-card>p').textContent = `로그인: ${state.user.email} · 프로필과 코스는 Supabase에 저장됩니다.`;
-    $('.profile-card').insertAdjacentHTML('beforeend', btn('logout', '로그아웃', 'user', 'outline full'));
+    const profileCardText = $('.profile-card>p'); if (profileCardText) profileCardText.textContent = `로그인: ${state.user.email} · 프로필과 코스는 Supabase에 저장됩니다.`;
+    $('.profile-card')?.insertAdjacentHTML('beforeend', btn('logout', '로그아웃', 'user', 'outline full'));
     const reset = $('[data-action="reset-confirm"]'); if (reset) reset.remove();
     const lines = document.querySelectorAll('.info-line');
     if (lines[0]) lines[0].innerHTML = '<strong>회원 계정</strong><p>이메일로 인증한 계정입니다. 다른 기기에서도 로그인하면 저장한 코스를 불러올 수 있습니다.</p>';
@@ -80,25 +103,25 @@ function refreshLiveMap() {
   const target = $('#real-map');
   if (target && state.config.map) mountLiveMap(target, state.config.mapKey, state.courseChosen ? state.course?.places || [] : [], state.courseChosen ? state.course?.places || [] : [], id => placeDialog(id), state.routeDetails);
 }
-function acceptCourse(course) { state.routeMode = null; state.routeDetails = null; state.routeBusy = false; state.courseChosen = false; state.mapExpanded = false; state.recommendations = course.recommendations || [course]; state.course = course; state.conditions = course.conditions; if (course.availablePlaces) state.places = course.availablePlaces; }
+function acceptCourse(course) { if (state.planningMemory.courseId !== course.id) { state.planningMemory = { courseId: course.id, lockedPlaceIds: [], preferences: state.planningMemory.preferences || [], excludedPlaceIds: [] }; state.previousPlan = null; } if (!state.shared) state.seenPlaceIds = [...new Set([...state.seenPlaceIds, ...(course.recommendations || [course]).flatMap(c => c.places.map(p => p.id))])].slice(-120); state.routeMode = null; state.routeDetails = null; state.routeBusy = false; state.courseChosen = false; state.mapExpanded = false; state.recommendations = course.recommendations || [course]; state.course = course; state.conditions = course.conditions; if (course.availablePlaces) state.places = course.availablePlaces; }
 function greeting(title, sub, eyebrow = 'MAKE ROOM FOR A LITTLE ADVENTURE') { return `<section class="greeting"><div><span class="eyebrow">${eyebrow}</span><h1>${title}</h1><p>${sub}</p></div><span class="date">${icon('calendar')}${esc(today.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' }))}</span></section>`; }
 function explore() {
   const c = state.conditions;
   return `${greeting('오늘, 어디로 떠나볼까요?', '취향이 닮은 장소부터 기분 좋은 동선까지. 우리의 하루를 찾아보세요.')}
-    <div class="filters" aria-label="현재 코스 조건">${[['pin', '어디로 갈까요?', `${c.region} · ${c.purpose}`], ['calendar', '언제 만날까요?', `${c.date.slice(5).replace('-', '.')} · ${c.start}`], ['wallet', '1인 예산', won(c.budget)], ['sun', '오늘의 취향', `${c.mood} · ${c.environment === '전체' ? '실내외' : c.environment}`]].map(([i, label, value]) => `<button class="filter-cell" data-action="filters">${icon(i)}<span><small>${label}</small><strong>${esc(value)}</strong></span>${icon('down', 'down')}</button>`).join('')}<div class="filter-end">${btn('filters', '조건 변경', 'filter', 'primary')}</div></div>
-    <div class="explore-toolbar"><div class="segment" role="group" aria-label="탐색 방식"><button data-action="view" data-view="map" class="${state.view === 'map' ? 'active' : ''}" aria-pressed="${state.view === 'map'}">${icon('map')}지도 탐색</button><button data-action="view" data-view="chat" class="${state.view === 'chat' ? 'active' : ''}" aria-pressed="${state.view === 'chat'}">${icon('spark')}AI와 계획하기</button></div><span class="toolbar-note">어디로 갈지 고민되는 순간, 어디가지</span></div>
+    <div class="filters" aria-label="현재 코스 조건">${[['pin', '어디로 갈까요?', `${c.region} · ${c.purpose}`], ['calendar', '언제 만날까요?', `${(c.date || dateISO).slice(5).replace('-', '.')} · ${c.start}`], ['wallet', '1인 예산', won(c.budget)], ['sun', '오늘의 취향', `${c.mood} · ${c.environment === '전체' ? '실내외' : c.environment}`]].map(([i, label, value]) => `<button class="filter-cell" data-action="filters">${icon(i)}<span><small>${label}</small><strong>${esc(value)}</strong></span>${icon('down', 'down')}</button>`).join('')}<div class="filter-end">${btn('filters', '조건 변경', 'filter', 'primary')}</div></div>
+    ${(c.categories?.length || c.excludedCategories?.length || (c.mood === '로맨틱한' && !c.includeMeals)) ? `<p class="constraint-note">${c.categories?.length ? esc(c.categories.join('·')) + '만 추천' : c.mood === '로맨틱한' && !c.includeMeals ? '로맨틱 데이트 · 카페만 (식사 요청 시 포함)' : ''}${c.excludedCategories?.length ? ' · ' + esc(c.excludedCategories.join('·')) + ' 제외' : ''}</p>` : ''}<div class="explore-toolbar"><div class="segment" role="group" aria-label="탐색 방식"><button data-action="view" data-view="map" class="${state.view === 'map' ? 'active' : ''}" aria-pressed="${state.view === 'map'}">${icon('map')}지도 탐색</button><button data-action="view" data-view="chat" class="${state.view === 'chat' ? 'active' : ''}" aria-pressed="${state.view === 'chat'}">${icon('spark')}AI와 계획하기</button></div><span class="toolbar-note">어디로 갈지 고민되는 순간, 어디가지</span></div>
     <div class="explore-grid ${state.view === 'chat' ? 'chat-layout' : ''}">${state.view === 'chat' ? chatPanel() : discovery()}${mapPanel()}</div><p class="sample-foot">샘플 체험 · 장소·사진·영업시간·비용·이동 경로는 시연용 예시입니다. 실제 AI 및 지도 서비스는 아직 연결되지 않았습니다.</p>`;
 }
 function courseCard(course, saved = false) {
   const c = course.conditions;
-  return `<article class="course-card"><div class="course-image">${photo(course.places[0])}<span class="photo-badge">${icon('spark')} ${esc(c.mood)} ${esc(c.purpose)}</span><button class="save-float ${isSaved(course) ? 'saved' : ''}" data-action="save" data-id="${esc(course.id)}" aria-label="${isSaved(course) ? '코스 저장 취소' : '코스 저장'}" aria-pressed="${isSaved(course)}">${icon('heart')}</button><span class="photo-caption">분위기 참고 이미지</span></div>
+  return `<article class="course-card"><div class="course-image">${photo(course.places[0])}<span class="photo-badge">${icon('spark')} ${esc(c.mood)} ${esc(c.purpose)}</span><button class="save-float ${isSaved(course) ? 'saved' : ''}" data-action="save" data-id="${esc(course.id)}" aria-label="${isSaved(course) ? '저장됨' : '코스 저장'}" aria-pressed="${isSaved(course)}">${icon('heart')}</button>${isSaved(course) ? '<span class="saved-state">♥ 저장됨</span>' : ''}<span class="photo-caption">분위기 참고 이미지</span></div>
     <div class="course-body"><div class="row"><span class="tag blue">${esc(c.region)}</span><span class="tag">${esc(c.environment === '전체' ? '실내 + 실외' : c.environment)}</span><span class="tag">${esc(c.transport)}</span></div><h3>${esc(course.title)}</h3><p>${c.purpose === '데이트' ? '서로에게 조금 더 집중할 수 있도록,' : '동네의 새로운 모습을 만날 수 있도록,'}<br>취향에 맞는 ${course.places.length}곳을 하나의 하루로 이었어요.</p>
     <div class="mini-route">${course.places.map((p, i) => `${i ? icon('chevron') : ''}<b>${esc(p.category)}</b>`).join('')}</div><div class="course-stats"><span class="row">${icon('clock')}${length(course.minutes)}</span><span class="row">${icon('wallet')}1인 ${course.estimated ? '예상 ' : ''}${won(course.totalCost)}</span><span class="row">${icon('pin')}${course.places.length}곳</span></div>
-    ${saved ? `<div class="saved-actions">${btn('course', '코스 다시 보기', 'arrow', 'primary', `data-id="${esc(course.id)}"`)}${actionIcon('remove-saved', 'trash', '저장한 코스 삭제', `data-id="${esc(course.id)}"`)}</div>` : btn('course', '우리의 코스 자세히 보기', 'arrow', 'primary full', `data-id="${esc(course.id)}"`)}</div></article>`;
+    ${saved ? `<div class="saved-actions">${btn('course', '코스 다시 보기', 'arrow', 'primary', `data-id="${esc(course.id)}"`)}${btn('edit-course', '블록 수정', '', 'outline', `data-id="${esc(course.id)}"`)}${actionIcon('remove-saved', 'trash', '저장한 코스 삭제', `data-id="${esc(course.id)}"`)}</div>` : btn('course', '우리의 코스 자세히 보기', 'arrow', 'primary full', `data-id="${esc(course.id)}"`)}</div></article>`;
 }
 function discovery() {
   const courses = state.recommendations.length ? state.recommendations : state.course ? [state.course] : [];
-  return '<section class="discovery"><div class="section-title"><h2>어떤 하루가 끌리세요?</h2><small>조건에 맞는 코스를 골라 주세요</small></div><div class="recommendations">' + courses.map((course, i) => '<article class="recommendation"><div class="recommendation-photo">' + photo(course.places.find(p => p.category === (course.concept === '공원 데이트' ? '산책' : course.concept === '문화 데이트' ? '문화' : '카페')) || course.places[0]) + '</div><div class="recommendation-body"><span class="tag blue">' + esc(course.label || String.fromCharCode(65 + i)) + ' 코스</span><h3>' + esc(course.concept || course.title) + '</h3>' + (course.environmentLabel ? '<small>' + esc(course.environmentLabel) + '</small>' : '') + '<p>' + course.places.map(p => esc(p.name)).join(' → ') + '</p><div class="course-stats"><span>' + length(course.minutes) + '</span><span>1인 예상 ' + won(course.totalCost) + '</span></div>' + btn('choose-course', '이 코스 선택', 'arrow', 'primary full', 'data-id="' + esc(course.id) + '"') + '</div></article>').join('') + '</div><button class="ai-invite" data-action="view" data-view="chat">' + icon('spark') + '<div><strong>다른 하루를 원하시나요?</strong><p>AI에게 취향을 알려 주세요.</p></div></button></section>';
+  return '<section class="discovery"><div class="section-title"><h2>어떤 하루가 끌리세요?</h2><div class="row">' + btn('refresh-courses', state.busy ? '새 코스를 찾는 중…' : '다른 코스 추천', '', 'outline', state.busy ? 'disabled' : '') + '</div></div><div class="recommendations">' + courses.map((course, i) => '<article class="recommendation"><div class="recommendation-photo">' + photo(course.places.find(p => p.category === (course.concept === '공원 데이트' ? '산책' : course.concept === '문화 데이트' ? '문화' : '카페')) || course.places[0]) + '</div><div class="recommendation-body"><span class="tag blue">' + esc(course.label || String.fromCharCode(65 + i)) + ' 코스</span><h3>' + esc(course.concept || course.title) + '</h3>' + (course.environmentLabel ? '<small>' + esc(course.environmentLabel) + '</small>' : '') + '<p>' + course.places.map(p => esc(p.name)).join(' → ') + '</p><div class="course-stats"><span>' + length(course.minutes) + '</span><span>1인 예상 ' + won(course.totalCost) + '</span></div>' + btn('choose-course', '이 코스 선택', 'arrow', 'primary full', 'data-id="' + esc(course.id) + '"') + '</div></article>').join('') + '</div><button class="ai-invite" data-action="view" data-view="chat">' + icon('spark') + '<div><strong>다른 하루를 원하시나요?</strong><p>AI에게 취향을 알려 주세요.</p></div></button></section>';
 }
 function routeLinks(a, b) {
   if (![a.lat,a.lng,b.lat,b.lng].every(Number.isFinite)) return '<span class="small muted">샘플 장소 · 실제 길찾기 없음</span>';
@@ -123,8 +146,9 @@ async function loadCourseRoute(mode) {
 }
 function coursePage() {
   const course = state.course;
+  if (state.shared) return sharedPage(course);
   if (!course) { state.tab = 'explore'; return explore(); }
-  return greeting(esc(course.concept || course.title), '선택한 장소와 방문 순서를 한눈에 확인하세요.', 'OUR DATE ROUTE') + '<div class="detail-actions">' + btn('other-courses', '다른 코스 선택', 'back', 'outline') + btn('save', isSaved(course) ? '저장 취소' : '코스 저장', 'heart', 'primary', 'data-id="' + esc(course.id) + '"') + btn('share', '공유', 'share', 'outline', 'data-id="' + esc(course.id) + '"') + '</div><div class="course-detail-grid"><section class="route-detail"><div class="detail-summary"><span>추천 일정 추정 (' + esc(course.conditions.transport) + ') ' + length(course.minutes) + '</span><span>1인 예상 ' + won(course.totalCost) + '</span><span>' + esc(course.conditions.start) + '–' + esc(course.end) + '</span></div><div class="timeline">' + course.places.map((p,i) => '<div class="stop"><time>' + esc(p.time) + '</time><span class="stop-number">' + (i+1) + '</span><div><button class="stop-place" data-action="place" data-id="' + esc(p.id) + '">' + photo(p) + '<span><h3>' + esc(p.name) + '</h3><p>' + esc(p.category) + ' · ' + p.stay + '분 · 예상 ' + won(p.cost) + '</p></span></button>' + (i < course.places.length - 1 ? routeLegDetails(course,i) : '') + '</div></div>').join('') + '</div></section>' + mapPanel() + '</div><p class="sample-foot">예상 일정 · 실제 길찾기와 영업 여부는 방문 전에 확인하세요.</p>';
+  return greeting(esc(course.concept || course.title), '선택한 장소와 방문 순서를 한눈에 확인하세요.', 'OUR DATE ROUTE') + '<div class="detail-actions">' + btn('edit-with-ai', '대화로 코스 수정', 'spark', 'primary') + btn('other-courses', '다른 코스 선택', 'back', 'outline') + btn('refresh-courses', '다른 코스 추천', '', 'outline', state.busy ? 'disabled' : '') + btn('save', hasSavedChanges(course) ? '변경사항 저장' : isSaved(course) ? '♥ 저장됨' : '코스 저장', 'heart', 'primary', 'data-id="' + esc(course.id) + '"') + btn('share', 'URL 복사', 'share', 'outline', 'data-id="' + esc(course.id) + '"') + (isSaved(course) ? btn('edit-course', '블록으로 수정', '', 'outline', 'data-id="' + esc(course.id) + '"') : '') + '</div><div class="course-detail-grid"><section class="route-detail"><div class="detail-summary"><span>추천 일정 추정 (' + esc(course.conditions.transport) + ') ' + length(course.minutes) + '</span><span>1인 예상 ' + won(course.totalCost) + '</span><span>' + esc(course.conditions.start) + '–' + esc(course.end) + '</span></div><div class="block-list">' + blocks(course) + '</div></section>' + mapPanel() + '</div><p class="sample-foot">예상 일정 · 실제 길찾기와 영업 여부는 방문 전에 확인하세요.</p>';
 }
 function miniPlace(p) { return `<button class="mini-place" data-action="place" data-id="${esc(p.id)}"><span class="thumb">${photo(p)}</span><span><small>${esc(p.category)} · ${esc(p.region)}</small><h3>${esc(p.name)}</h3><p>${esc(p.environment)} · ${p.estimated ? '예상 ' : ''}${won(p.cost)}</p></span>${icon('chevron')}</button>`; }
 function filteredPlaces() { return state.places.filter(p => p.region === state.conditions.region && (state.filter === '전체' || p.category === state.filter) && `${p.name} ${p.category} ${p.description} ${p.region}`.includes(state.query)); }
@@ -145,8 +169,12 @@ function mapArt() {
   return `<div class="map-art" style="transform:scale(${state.zoom})"><svg class="base-map" viewBox="0 0 1000 800" preserveAspectRatio="none" aria-hidden="true"><rect width="1000" height="800" fill="#f1f2ec"/><g transform="rotate(-13 500 400)">${blocks}<path d="M-100 312H1100M360-100V900" stroke="#d6dbd2" stroke-width="30"/><path d="M-100 312H1100M360-100V900" stroke="#fffefa" stroke-width="25"/><path d="M-100 600H1100M790-100V900" stroke="#fffefa" stroke-width="21"/><path d="M-100 314H1100" stroke="#d2c9b1" stroke-width="2" stroke-dasharray="9 8"/></g><path d="M-20 460Q135 460 164 550T370 830H-20Z" fill="#d4e1cb"/><path d="M-30 590Q90 480 150 650T325 830" fill="none" stroke="#eaf0df" stroke-width="14"/><path d="M670 800Q730 655 1030 625V830Z" fill="#cce2e7"/><path d="M650 800Q724 635 1030 607" fill="none" stroke="#e5edd9" stroke-width="24"/><text x="490" y="165" font-size="22" fill="#939e91" font-family="sans-serif" letter-spacing="6">${esc(state.conditions.region)}동</text><text x="70" y="655" font-size="15" fill="#8da480" font-family="sans-serif">동네 공원</text><text x="820" y="740" font-size="14" fill="#87a8b1" font-family="sans-serif">물빛 산책로</text><text x="390" y="620" font-size="12" fill="#a2aa9e" font-family="sans-serif" transform="rotate(-13 390 620)">연무장길 · 예시</text><path d="${line}" fill="none" stroke="#fff" stroke-width="9" stroke-linejoin="round"/><path d="${line}" fill="none" stroke="#476ce2" stroke-width="4" stroke-linecap="round" stroke-dasharray="5 8" stroke-linejoin="round"/></svg>
     ${visible.map(p => { const idx = course.findIndex(x => x.id === p.id); return `<button class="pin-button ${state.selected === p.id ? 'selected' : ''} ${idx === -1 ? 'alternative' : ''}" data-action="place" data-id="${p.id}" style="left:${p.x}%;top:${p.y}%" aria-label="${esc(p.name)} 장소 상세">${idx > -1 ? `<b>${idx + 1}</b>${esc(p.name)}` : icon(p.category === '카페' ? 'coffee' : 'pin')}</button>`; }).join('')}</div>${!visible.length ? '<div class="map-empty">검색 결과가 없어요. 검색어나 분류를 바꿔 주세요.</div>' : ''}`;
 }
+function conversationContext() {
+  if (!state.course) return '';
+  return `<div class="conversation-context"><strong>지금 수정하는 코스</strong><ol>${state.course.places.map(p => `<li>${esc(p.name)}${state.planningMemory.lockedPlaceIds?.includes(p.id) ? '<span class="tag">유지</span>' : ''}</li>`).join('')}</ol>${state.planningMemory.preferences?.length ? `<small>요청한 취향: ${state.planningMemory.preferences.map(esc).join(' · ')} (확인되지 않은 정보는 보장하지 않아요)</small>` : ''}${state.planningMemory.history?.length ? `<details><summary>최근 변경 기록</summary><ul>${state.planningMemory.history.slice(-5).map(text => `<li>${esc(text)}</li>`).join('')}</ul></details>` : ''}${state.planningMemory.pendingConditions ? '<p>새 조건과 충돌하여 코스는 유지 중이에요. 다음 대화에서 조정해 주세요.</p>' : ''}${btn('save', hasSavedChanges(state.course) ? '변경사항 저장' : isSaved(state.course) ? '♥ 저장됨' : '코스 저장', 'heart', 'outline', `data-id="${esc(state.course.id)}"`)}${state.previousPlan ? btn('undo-chat-edit', '직전 변경 되돌리기', '', 'outline') : ''}</div>`;
+}
 function chatPanel() {
-  return `<section class="chat-panel" aria-label="AI 코스 계획 체험"><div class="chat-heading"><div class="row"><span class="ai-avatar">${icon('spark')}</span><strong>우리의 하루를 함께 계획해요</strong></div><p>샘플 대화 체험 · 입력한 조건을 코스에 반영해요</p></div><div class="messages" aria-live="polite" aria-label="대화 내역">${state.messages.map(m => `<div class="bubble ${m.role === 'user' ? 'user' : ''}">${esc(m.text)}</div>${m.course ? `<div class="chat-route"><h3>${esc(m.course.title)}</h3><p>${m.course.places.map(p => esc(p.name)).join(' → ')}</p>${btn('chat-course', '이 코스를 지도에서 보기', 'map', '', `data-id="${esc(m.course.id)}"`)}</div>` : ''}`).join('')}${state.chatting ? '<div class="bubble" role="status">조건에 맞는 하루를 찾고 있어요…</div>' : ''}</div><div class="suggestions">${['실내로 바꿔 줘', '1인 3만원으로', '로맨틱한 데이트'].map(x => `<button data-action="suggest" data-message="${x}" ${state.chatting ? 'disabled' : ''}>${x}</button>`).join('')}</div><form id="chat-form" class="chat-compose"><textarea id="chat-input" name="message" placeholder="어떤 데이트를 하고 싶으세요?" aria-label="데이트 요청 메시지" maxlength="1500" required ${state.chatting ? 'disabled' : ''}></textarea><button aria-label="메시지 보내기" ${state.chatting ? 'disabled' : ''}>${icon('arrow')}</button></form><p class="chat-note">현재 선택한 지역·예산·시간을 이어서 반영합니다.</p></section>`;
+  return `<section class="chat-panel" aria-label="AI 코스 계획 체험"><div class="chat-heading"><div class="row"><span class="ai-avatar">${icon('spark')}</span><strong>우리의 하루를 함께 계획해요</strong></div><p>샘플 대화 체험 · 입력한 조건을 코스에 반영해요</p></div>${conversationContext()}<div class="messages" aria-live="polite" aria-label="대화 내역">${state.messages.map(m => `<div class="bubble ${m.role === 'user' ? 'user' : ''}">${esc(m.text)}</div>${m.course ? `<div class="chat-route"><h3>${esc(m.course.title)}</h3><p>${m.course.places.map(p => esc(p.name)).join(' → ')}</p>${btn('chat-course', '이 코스를 지도에서 보기', 'map', '', `data-id="${esc(m.course.id)}" data-revision="${m.course.revision || 0}"`)}</div>` : ''}`).join('')}${state.chatting ? '<div class="bubble" role="status">조건에 맞는 하루를 찾고 있어요…</div>' : ''}</div><div class="suggestions">${['두 번째 장소는 유지해줘', '이동을 최소로 해줘', '식당은 제외해줘'].map(x => `<button data-action="suggest" data-message="${x}" ${state.chatting ? 'disabled' : ''}>${x}</button>`).join('')}</div><form id="chat-form" class="chat-compose"><textarea id="chat-input" name="message" placeholder="예: 두 번째 장소는 유지하고 식당만 바꿔줘" aria-label="데이트 요청 메시지" maxlength="1500" required ${state.chatting ? 'disabled' : ''}></textarea><button aria-label="메시지 보내기" ${state.chatting ? 'disabled' : ''}>${icon('arrow')}</button></form><p class="chat-note">현재 코스를 기준으로 수정합니다. 저장 버튼을 눌러야 저장한 코스에 반영됩니다.</p></section>`;
 }
 function savedPage() { return `${greeting('다음에 함께 가요.', '마음에 든 하루를 모아 두었어요. 언제든 다시 꺼내 보세요.', 'OUR LITTLE COLLECTION')}${state.saved.length ? `<div class="saved-grid">${state.saved.map(c => courseCard(c, true)).join('')}</div>` : `<div class="empty-state">${icon('heart')}<h2>아직 저장한 코스가 없어요.</h2><p>마음에 드는 코스의 하트를 눌러 주세요.<br>우리의 다음 데이트가 여기에 모여요.</p>${btn('nav', '첫 번째 코스 찾아보기', 'arrow', 'primary', 'data-tab="explore"')}</div>`}`; }
 function profilePage() {
@@ -155,24 +183,27 @@ function profilePage() {
 }
 
 const dialog = $('#dialog');
-function openDialog(title, body, footer = '') {
+function openDialog(title, body, footer = '', locked = false) {
+  loginDialogLocked = locked;
   modalReturn = document.activeElement;
-  dialog.innerHTML = `<div class="dialog-head"><h2 id="dialog-title">${title}</h2>${actionIcon('close', 'close', '닫기')}</div><div class="dialog-body">${body}</div>${footer ? `<div class="dialog-actions">${footer}</div>` : ''}`;
+  dialog.innerHTML = `<div class="dialog-head"><h2 id="dialog-title">${title}</h2>${locked ? '' : actionIcon('close', 'close', '닫기')}</div><div class="dialog-body">${body}</div>${footer ? `<div class="dialog-actions">${footer}</div>` : ''}`;
   if (!dialog.open) dialog.showModal();
   dialog.scrollTop = 0;
 }
-function closeDialog() { dialog.close(); modalReturn?.focus?.(); }
+function closeDialog() { if (loginDialogLocked && !state.user && !state.shared) return; loginDialogLocked = false; dialog.close(); modalReturn?.focus?.(); }
+dialog.addEventListener('cancel', e => { if (loginDialogLocked && !state.user && !state.shared) e.preventDefault(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && loginDialogLocked && !state.user && !state.shared) { e.preventDefault(); e.stopPropagation(); } }, true);
 dialog.addEventListener('click', e => { if (e.target === dialog) { const r = dialog.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeDialog(); } });
 function selectField(name, label, values, current) { return `<label class="field">${label}<select name="${name}">${values.map(v => { const [value, text] = Array.isArray(v) ? v : [v, v]; return `<option value="${esc(value)}" ${String(value) === String(current) ? 'selected' : ''}>${esc(text)}</option>`; }).join('')}</select></label>`; }
 function filtersDialog() {
   const c = state.conditions;
   openDialog('어떤 하루를 만들까요?', `<p>이번 데이트에 맞는 조건을 골라 주세요.<br>부담 없는 예산과 편안한 동선부터 시작해요.</p><form id="conditions-form"><div class="form-grid"><label class="field">희망 지역<input name="region" type="text" maxlength="60" value="${esc(c.region)}" placeholder="예: 부산 해운대, 수원 행궁동, 제주 애월" required></label>${selectField('purpose', '오늘의 목적', ['데이트', '여행'], c.purpose)}<label class="field">날짜<input name="date" type="date" value="${esc(c.date)}" required></label><label class="field">시작 시간<input name="start" type="time" value="${esc(c.start)}" required></label>${selectField('duration', '함께할 시간', [[120, '2시간'], [180, '3시간'], [240, '4시간'], [360, '6시간']], c.duration)}<label class="field">1인당 예산 (원)<input name="budget" type="number" min="0" max="1000000" step="500" value="${c.budget}" required></label>${selectField('mood', '선호 분위기', ['여유로운', '감성적인', '로맨틱한', '활동적인'], c.mood)}${selectField('transport', '이동수단', ['도보', '대중교통', '자동차'], c.transport)}${selectField('environment', '실내 · 실외', [['전체', '상관없어요'], '실내', '실외'], c.environment)}</div><div class="form-note">시·군·구나 동네 이름을 입력해 주세요. 실제 장소 검색은 국내 지역을 지원하며, 샘플 모드에서는 성수·연남·해방촌만 이용할 수 있어요. 영업 여부와 교통 상황은 반영되지 않습니다.</div><p id="form-error" class="form-error" role="alert"></p></form>`, `<button class="btn primary" type="submit" form="conditions-form">${icon('spark')}이 조건으로 코스 찾기</button>`);
 }
-function lookupCourse(id) { return [...state.recommendations, state.course, ...state.saved, ...state.messages.map(m => m.course)].find(c => c && c.id === id) || state.course; }
+function lookupCourse(id, revision) { if (revision !== undefined) { const match = state.messages.map(m => m.course).find(c => c && c.id === id && String(c.revision || 0) === String(revision)); if (match) return match; } return [state.course, ...state.saved, ...state.recommendations, ...state.messages.map(m => m.course)].find(c => c && c.id === id) || state.course; }
 function courseDialog(course) {
   if (!course) return;
   draftCourse = course;
-  openDialog('우리의 하루', `<div class="detail-hero" style="border-radius:13px;overflow:hidden">${photo(course.places[0])}<span class="photo-caption">분위기 참고 이미지</span></div><div class="row" style="margin-top:20px"><span class="tag blue">${esc(course.conditions.region)}</span><span class="tag">${esc(course.conditions.purpose)}</span><span class="tag">샘플 코스</span></div><h3 class="detail-title">${esc(course.title)}</h3><p>${esc(course.conditions.date || dateISO)} · ${esc(course.conditions.start)}–${esc(course.end)}</p><div class="detail-summary"><span>${icon('clock')}${length(course.minutes)}</span><span>${icon('wallet')}1인 ${won(course.totalCost)}</span><span>${icon('walk')}${esc(course.conditions.transport)}</span></div><div class="timeline">${course.places.map((p, i) => `<div class="stop"><time>${p.time}</time><span class="stop-number">${i + 1}</span><div><button class="stop-place" data-action="place" data-id="${p.id}" data-from="course">${photo(p)}<span><span class="small muted">${esc(p.category)} · ${p.stay}분</span><h3>${esc(p.name)}</h3><p>${won(p.cost)} · ${esc(p.environment)}</p></span></button>${i < course.places.length - 1 ? `<p class="travel-note">${icon('walk')} ${esc(course.conditions.transport)} 약 ${course.places[i + 1].travel}분 · 예시</p>` : ''}</div></div>`).join('')}</div><div class="form-note">장소·영업시간·이동 시간·비용은 샘플입니다. 실제 장소 데이터와 경로 최적화는 아직 연결되지 않았습니다.</div>`, `${btn('save-detail', isSaved(course) ? '저장 취소' : '코스 저장', 'heart', 'primary', `data-id="${course.id}"`)}${btn('share', '공유', 'share', 'outline', `data-id="${course.id}"`)}${btn('use-course', '지도', 'map', 'outline', `data-id="${course.id}"`)}`);
+  openDialog('우리의 하루', `<div class="detail-hero" style="border-radius:13px;overflow:hidden">${photo(course.places[0])}<span class="photo-caption">분위기 참고 이미지</span></div><div class="row" style="margin-top:20px"><span class="tag blue">${esc(course.conditions.region)}</span><span class="tag">${esc(course.conditions.purpose)}</span><span class="tag">샘플 코스</span></div><h3 class="detail-title">${esc(course.title)}</h3><p>${esc(course.conditions.date || dateISO)} · ${esc(course.conditions.start)}–${esc(course.end)}</p><div class="detail-summary"><span>${icon('clock')}${length(course.minutes)}</span><span>${icon('wallet')}1인 ${won(course.totalCost)}</span><span>${icon('walk')}${esc(course.conditions.transport)}</span></div><div class="timeline">${course.places.map((p, i) => `<div class="stop"><time>${p.time}</time><span class="stop-number">${i + 1}</span><div><button class="stop-place" data-action="place" data-id="${p.id}" data-from="course">${photo(p)}<span><span class="small muted">${esc(p.category)} · ${p.stay}분</span><h3>${esc(p.name)}</h3><p>${won(p.cost)} · ${esc(p.environment)}</p></span></button>${i < course.places.length - 1 ? `<p class="travel-note">${icon('walk')} ${esc(course.conditions.transport)} 약 ${course.places[i + 1].travel}분 · 예시</p>` : ''}</div></div>`).join('')}</div><div class="form-note">장소·영업시간·이동 시간·비용은 샘플입니다. 실제 장소 데이터와 경로 최적화는 아직 연결되지 않았습니다.</div>`, `${btn('save-detail', hasSavedChanges(course) ? '변경사항 저장' : isSaved(course) ? '♥ 저장됨' : '코스 저장', 'heart', 'primary', `data-id="${course.id}"`)}${btn('share', '공유', 'share', 'outline', `data-id="${course.id}"`)}${btn('use-course', '지도', 'map', 'outline', `data-id="${course.id}"`)}`);
   if (!course.demo) {
     dialog.querySelector('.dialog-body>.row .tag:last-child').textContent = '실제 장소 · 추정 일정';
     dialog.querySelector('.form-note').textContent = '카카오에서 검색한 실제 장소입니다. 비용·실내외·체류·이동 시간은 분류별 추정값으로 실제 영업 여부·가격·교통은 각 장소에서 확인해 주세요. 지도 경로 조회 상태를 확인하고 최신 교통 정보는 길찾기에서 확인해 주세요.';
@@ -188,7 +219,7 @@ function placeDialog(id, fromCourse = false) {
     dialog.querySelector('.dialog-body>.row .tag:last-child').textContent = '카카오 장소 정보';
     const addressNote = dialog.querySelector('.place-detail-grid span small'); if (addressNote) addressNote.textContent = '카카오 장소 검색에서 제공한 주소입니다.';
     const reason = dialog.querySelector('.place-detail-grid span:last-child'); if (reason) reason.textContent = '분위기·실내외·가격·영업 여부는 방문 전 확인이 필요합니다.';
-    if (p.sourceUrl) dialog.querySelector('.dialog-actions').insertAdjacentHTML('afterbegin', `<a class="btn outline" href="${esc(p.sourceUrl)}" target="_blank" rel="noopener noreferrer">카카오맵에서 확인</a>`);
+    if (/^https:\/\/place\.map\.kakao\.com\//.test(p.sourceUrl || '')) dialog.querySelector('.dialog-actions').insertAdjacentHTML('afterbegin', `<a class="btn outline" href="${esc(p.sourceUrl)}" target="_blank" rel="noopener noreferrer">카카오맵에서 확인</a>`);
   }
 }
 function onboard(step = 0, editing = false) {
@@ -273,55 +304,88 @@ async function finishProfile(location) {
 // 현재 조건과 최근 대화를 함께 보내며 처리 중에는 중복 전송을 막습니다.
 async function sendChat(message) {
   if (state.chatting || !message.trim()) return;
+  const generation = accountGeneration;
   state.messages.push({ role: 'user', text: message.trim() }); state.chatting = true; state.view = 'chat'; state.tab = 'explore'; render();
-    try { const reply = await api('/api/chat', { message, conditions: state.conditions, history: state.messages.slice(-9, -1).map(m => ({ role: m.role, text: m.text })) }); state.messages.push({ role: 'assistant', text: reply.message, course: reply.course }); if (reply.course) { acceptCourse(reply.course); state.query = ''; state.filter = '전체'; } }
-  catch (e) { state.messages.push({ role: 'assistant', text: e.message }); }
-  finally { state.chatting = false; render(); $('#chat-input')?.focus(); }
+    try { const reply = await api('/api/chat', { message, currentCourse: compactCourse(state.course), memory: state.planningMemory, conditions: state.conditions, excludePlaceIds: state.seenPlaceIds, history: state.messages.slice(-25, -1).map(m => ({ role: m.role, text: m.text })) }); if (generation !== accountGeneration) return; if (reply.course || reply.memory) state.previousPlan = { course: structuredClone(state.course), memory: structuredClone(state.planningMemory) }; state.messages.push({ role: 'assistant', text: reply.message, course: reply.course }); if (reply.memory) state.planningMemory = reply.memory; if (reply.conditions) state.conditions = reply.conditions; if (reply.course) { acceptCourse(reply.course); state.courseChosen = true; state.query = ''; state.filter = '전체'; } }
+  catch (e) { if (generation === accountGeneration) state.messages.push({ role: 'assistant', text: e.message }); }
+  finally { if (generation === accountGeneration) { state.chatting = false; render(); $('#chat-input')?.focus(); } }
 }
 // 로그인 사용자는 서버 저장 성공 후 화면을 갱신하고, 게스트는 이 기기의 localStorage에 저장합니다.
-async function toggleSave(course) {
+async function toggleSave(course, remove = false) {
+  if (!state.user || state.shared) return authDialog('login');
   if (!course) return;
-  const removed = isSaved(course);
+  const changedSaved = hasSavedChanges(course);
+  if (isSaved(course) && !changedSaved && !remove) { toast('이미 저장한 코스예요. 삭제는 저장한 코스의 휴지통 버튼을 이용해 주세요.'); return; }
+  const removed = remove;
   if (state.user) { try { const { availablePlaces, ...compact } = course; await api('/api/saved', removed ? { remove: course.id } : { course: compact }); } catch (e) { toast(e.message); return; } }
-  state.saved = removed ? state.saved.filter(p => p.id !== course.id) : [course, ...state.saved];
+  state.saved = removed ? state.saved.filter(p => p.id !== course.id) : [course, ...state.saved.filter(c => c.id !== course.id)];
   const persisted = state.user || persist('saved', state.saved); render(); if (persisted) toast(removed ? '저장한 코스에서 삭제했어요.' : '둘만의 다음 하루를 저장했어요.');
 }
+async function refreshRecommendations() {
+  if (state.busy || !state.user) return;
+  if (state.planningMemory.lockedPlaceIds?.length) { await sendChat('유지하기로 한 장소는 그대로 두고 나머지 장소는 새로운 장소로 교체해줘.'); return; }
+  state.busy = true; render();
+  try { const c = await api('/api/plan', { ...state.conditions, excludePlaceIds: state.seenPlaceIds }); acceptCourse(c); state.tab = 'explore'; state.query = ''; state.filter = '전체'; toast('이전 장소를 제외한 새 코스를 준비했어요.'); }
+  catch (e) { toast(e.message); }
+  finally { state.busy = false; render(); }
+}
 async function share(course) {
-  const text = `어디가지 베타 · ${course.title}\n${course.conditions.date || dateISO}\n${course.places.map(p => `${p.time} ${p.name} (${won(p.cost)})`).join('\n')}\n1인 합계 ${won(course.totalCost)} · ${length(course.minutes)}\n${course.demo ? '※ 시연용 샘플 코스입니다.' : '※ 카카오 검색 장소로 구성한 코스이며 비용·시간은 추정입니다. 영업 여부는 방문 전 확인해 주세요.'}`;
-  if (window.EodigajiNative?.installed) { try { await window.EodigajiNative.share(text); } catch { toast('공유를 취소했거나 사용할 수 없어요.'); } return; }
-  try { await navigator.clipboard.writeText(text); toast('코스를 복사했어요. 메시지에 붙여 넣어 공유하세요.'); }
-  catch { openDialog('코스 공유', `<p>아래 일정을 복사해서 함께 갈 사람에게 보내 주세요.</p><textarea class="share-text" readonly aria-label="공유할 코스 내용">${esc(text)}</textarea>`, btn('close', '닫기', '', 'primary')); $('.share-text')?.select(); }
+  if (!state.user || state.shared) return;
+  try {
+    if (!isSaved(course) || state.saved.some(c => c.id === course.id && (c.revision || 0) !== (course.revision || 0))) {
+      const { availablePlaces, recommendations, ...compact } = course;
+      await api('/api/saved', { course: compact }); state.saved = [compact, ...state.saved.filter(c => c.id !== compact.id)];
+    }
+    const { url } = await api('/api/shares', { courseId: course.id });
+    try { await navigator.clipboard.writeText(url); toast('읽기 전용 공유 URL을 복사했어요.'); }
+    catch { openDialog('URL 복사', `<p>링크를 받은 사람은 로그인 없이 볼 수 있으며 편집할 수 없어요.</p><textarea class="share-text" readonly aria-label="공유할 코스 링크">${esc(url)}</textarea>`, btn('close', '닫기', '', 'primary')); $('.share-text')?.select(); }
+  } catch (e) { toast(e.message); }
 }
 // 이벤트 위임: 화면을 다시 그려도 data-action 속성으로 버튼 동작을 한 곳에서 처리합니다.
 document.addEventListener('click', async e => {
   const target = e.target.closest('[data-action]'); if (!target || target.disabled) return;
   const { action, id } = target.dataset;
+  if (action === 'home') {
+    state.shared = false; state.editor = null; state.tab = 'explore'; state.courseChosen = false;
+    window.history.replaceState(null, '', window.location.pathname); closeDialog();
+    if (state.user) await ensurePlan(); render(); window.scrollTo(0, 0); return;
+  }
+  if (state.shared && !['auth-login', 'auth-signup', 'connections', 'install-app', 'close'].includes(action)) return;
+  if (action === 'edit-course') { const c = state.saved.find(c => c.id === id); if (c) { state.editor = structuredClone(c); state.tab = 'course'; render(); } return; }
+  if (action === 'cancel-edit') { state.editor = null; render(); return; }
+  if (action === 'save-edit') { await saveEditor(); return; }
+  if (action === 'block-up' || action === 'block-down') { moveBlock(Number(target.dataset.index), Number(target.dataset.index) + (action === 'block-up' ? -1 : 1)); return; }
+  if (action === 'block-remove') { if (state.editor.places.length <= 2) return toast('코스에는 장소가 2개 이상 필요해요.'); state.editor.places.splice(Number(target.dataset.index), 1); render(); return; }
+  if (action === 'block-add') { const p = state.places.find(p => p.id === $('#editor-place').value); if (p && state.editor.places.length < 12) { state.editor.places.push({ ...structuredClone(p), travel: 10 }); render(); } return; }
   if (action === 'close') closeDialog();
-  if (action === 'nav') { state.tab = target.dataset.tab; render(); window.scrollTo(0, 0); }
-  if (action === 'view') { state.view = target.dataset.view; state.tab = 'explore'; render(); }
+  if (action === 'nav') { state.editor = null; state.tab = target.dataset.tab; render(); window.scrollTo(0, 0); }
+  if (action === 'view') { state.view = target.dataset.view; if (state.view === 'chat' && state.course) state.courseChosen = true; state.tab = 'explore'; render(); }
+  if (action === 'undo-chat-edit' && state.previousPlan) { const previous = state.previousPlan; acceptCourse(previous.course); state.planningMemory = previous.memory; state.previousPlan = null; state.messages.push({ role: 'assistant', text: '직전 코스 변경을 되돌렸어요. 저장한 코스는 변경하지 않았습니다.' }); render(); return; }
+  if (action === 'edit-with-ai') { state.tab = 'explore'; state.view = 'chat'; render(); $('#chat-input')?.focus(); return; }
+  if (action === 'refresh-courses') { await refreshRecommendations(); return; }
   if (action === 'filters') filtersDialog();
   if (action === 'category') { state.filter = target.dataset.category; render(); }
   if (['zoom-in', 'zoom-out', 'map-reset'].includes(action)) { if (state.course && !state.course.demo) { if (action === 'map-reset') refreshLiveMap(); else zoomLiveMap(action === 'zoom-in' ? -1 : 1); } else { state.zoom = action === 'map-reset' ? 1 : Math.max(1, Math.min(1.75, state.zoom + (action === 'zoom-in' ? .25 : -.25))); $('#map-render').innerHTML = mapArt(); } }
-  if (action === 'course' || action === 'choose-course') { const course = lookupCourse(id); if (course) { state.course = course; state.conditions = course.conditions; state.courseChosen = true; state.tab = 'course'; state.mapExpanded = false; state.routeMode = course.conditions.transport; closeDialog(); await loadCourseRoute(state.routeMode); window.scrollTo(0,0); } }
+  if (action === 'course' || action === 'choose-course') { const course = state.tab === 'saved' ? state.saved.find(c => c.id === id) : lookupCourse(id); if (course) { state.course = course; state.conditions = course.conditions; state.courseChosen = true; state.tab = 'course'; state.mapExpanded = false; state.routeMode = course.conditions.transport; closeDialog(); await loadCourseRoute(state.routeMode); window.scrollTo(0,0); } }
   if (action === 'route-mode') await loadCourseRoute(target.dataset.mode);
   if (action === 'other-courses') { state.courseChosen = false; state.tab = 'explore'; state.mapExpanded = false; render(); window.scrollTo(0,0); }
   if (action === 'expand-map') { state.mapExpanded = !state.mapExpanded; render(); }
   if (action === 'place') placeDialog(id, target.dataset.from === 'course');
   if (action === 'back-course') { closeDialog(); state.tab = 'course'; render(); }
   if (action === 'save' || action === 'save-detail') { const c = lookupCourse(id); target.disabled = true; await toggleSave(c); target.disabled = false; if (action === 'save-detail') courseDialog(c); }
-  if (action === 'remove-saved') toggleSave(lookupCourse(id));
+  if (action === 'remove-saved') await toggleSave(lookupCourse(id), true);
   if (action === 'share') await share(lookupCourse(id));
-  if (action === 'use-course' || action === 'chat-course') { const c = lookupCourse(id); acceptCourse(c); state.courseChosen = true; if (!c.demo && !c.availablePlaces) state.places = c.places; state.view = 'map'; state.tab = 'course'; state.query = ''; state.filter = '전체'; closeDialog(); render(); window.scrollTo(0, 0); }
+  if (action === 'use-course' || action === 'chat-course') { const c = lookupCourse(id, target.dataset.revision); acceptCourse(c); state.courseChosen = true; if (!c.demo && !c.availablePlaces) state.places = c.places; state.view = 'map'; state.tab = 'course'; state.query = ''; state.filter = '전체'; closeDialog(); render(); window.scrollTo(0, 0); }
   if (action === 'suggest') await sendChat(target.dataset.message);
   if (action === 'place-chat') { const p = state.places.find(p => p.id === id); closeDialog(); await sendChat(`${p.region}에서 ${p.environment}, ${p.mood === '여유로운' ? '조용한' : p.mood} ${state.conditions.purpose}`); }
   if (action === 'onboard') { draftProfile = {}; if (state.config.auth) authDialog('login'); else onboard(0); }
   if (action === 'connections') connectionsDialog();
   if (action === 'auth-login' || action === 'auth-signup') authDialog(action === 'auth-login' ? 'login' : 'signup');
   if (action === 'logout') {
+    await flushWorkspace();
     try { await api('/api/auth/logout', {}); } catch (e) { toast(e.message); return; }
     // 클라우드 데이터는 보존하고 화면의 회원 정보만 비웁니다. 과거 체험 프로필을 복원하지 않습니다.
-    state.user = null; state.profile = null; state.saved = [];
-    draftProfile = {}; draftCourse = null;
+    clearPrivateState();
     closeDialog(); render();
   }
   if (action === 'signup') onboard(1);
@@ -348,9 +412,9 @@ document.addEventListener('submit', async e => {
     else { if (draftProfile.interests.includes('전시')) state.conditions.mood = '감성적인'; else if (draftProfile.personality === '차분한 편') state.conditions.mood = '여유로운'; onboard(2); }
   }
   if (e.target.id === 'conditions-form' && !state.busy) {
-    const conditions = Object.fromEntries(new FormData(e.target)); state.busy = true;
+    const conditions = { ...state.conditions, ...Object.fromEntries(new FormData(e.target)) }; state.busy = true;
     const submit = dialog.querySelector('[type="submit"]'); submit.disabled = true; submit.textContent = '코스를 찾고 있어요…';
-    try { const course = await api('/api/plan', conditions); acceptCourse(course); state.query = ''; state.filter = '전체'; state.selected = null; state.tab = 'explore'; closeDialog(); render(); toast('선택한 조건으로 코스를 준비했어요.'); }
+    try { const course = await api('/api/plan', { ...conditions, excludePlaceIds: state.seenPlaceIds }); acceptCourse(course); state.query = ''; state.filter = '전체'; state.selected = null; state.tab = 'explore'; closeDialog(); render(); toast('선택한 조건으로 코스를 준비했어요.'); }
     catch (err) { if ($('#form-error')) $('#form-error').textContent = err.message; }
     finally { state.busy = false; if (submit.isConnected) { submit.disabled = false; submit.innerHTML = `${icon('spark')}이 조건으로 코스 찾기`; } }
   }
@@ -359,13 +423,15 @@ async function init() {
   const confirmation = new URLSearchParams(window.location.hash.slice(1));
   const returnedFromEmail = confirmation.has('access_token') || confirmation.has('error') || confirmation.has('error_code');
   if (returnedFromEmail) window.history.replaceState(null, '', window.location.pathname + window.location.search);
-  try { state.config = await api('/api/config'); [state.places, state.course] = await Promise.all([api('/api/places'), api('/api/plan', state.conditions)]); acceptCourse(state.course);
-    if (state.config.auth) {
-      // 온라인 계정 모드에서는 브라우저의 체험 데이터를 회원 정보처럼 표시하지 않습니다.
-      state.profile = null; state.saved = [];
-      const result = await api('/api/auth/user'); state.user = result.user;
-      if (state.user) await loadAccount();
-    }
+  try {
+    state.config = await api('/api/config');
+    state.profile = null; state.saved = [];
+    const result = await api('/api/auth/user'); state.user = result.user;
+    const shareId = new URLSearchParams(window.location.search).get('share');
+    const shared = shareId ? (await api('/api/shares/' + encodeURIComponent(shareId))).course : readSharedCourse(window.location.hash);
+    if (state.user) await loadAccount();
+    if (shared) { state.shared = true; acceptCourse(shared); state.places = shared.places; state.courseChosen = true; state.tab = 'course'; }
+    else if (state.user) await ensurePlan();
     render();
     if (returnedFromEmail) {
       authDialog('login');
@@ -373,7 +439,7 @@ async function init() {
         ? '인증 링크가 만료되었거나 이미 사용되었을 수 있어요. 먼저 로그인해 보고, 인증되지 않았다면 새 인증 메일을 받아 주세요.'
         : '이메일 인증을 마쳤어요. 가입한 이메일과 비밀번호로 로그인해 주세요.';
     }
-    if (window.EodigajiNative?.installed && !state.profile && !stored('welcome-seen', false)) { persist('welcome-seen', true); if (state.config.auth) authDialog('signup'); else onboard(0); }
+    if (state.user && window.EodigajiNative?.installed && !state.profile && !stored('welcome-seen', false)) { persist('welcome-seen', true); if (state.config.auth) authDialog('signup'); else onboard(0); }
   }
   catch (e) { $('#app').innerHTML = `<div class="boot">${brand}<p>${esc(e.message)}</p><button class="btn primary" id="retry">다시 연결하기</button>${btn('connections', '서비스 설정 확인', 'info', 'outline')}</div>`; $('#retry').addEventListener('click', init); }
 }
@@ -393,10 +459,19 @@ function connectionsDialog() {
 }
 function authDialog(mode) {
   const signup = mode === 'signup';
-  openDialog(signup ? '회원가입' : '로그인', `<p>이메일 계정으로 코스와 취향을 저장하세요.</p><form id="auth-form"><input type="hidden" name="mode" value="${mode}"><div class="stack"><label class="field">이메일<input type="email" name="email" required maxlength="254" autocomplete="email"></label><label class="field">비밀번호<input type="password" name="password" required minlength="8" maxlength="128" autocomplete="${signup ? 'new-password' : 'current-password'}"></label></div><div class="form-note">${signup ? '가입 후 인증 이메일을 확인한 다음 로그인해 주세요. 비밀번호는 브라우저 저장 공간에 보관하지 않습니다.' : 'Supabase에서 계정을 인증합니다. 비밀번호는 브라우저 저장 공간에 보관하지 않습니다.'}</div><p id="auth-error" class="form-error" role="alert"></p></form>`, `${btn(signup ? 'auth-login' : 'auth-signup', signup ? '로그인으로' : '회원가입', '', 'outline')}<button class="btn primary" type="submit" form="auth-form">${signup ? '가입하기' : '로그인'}</button>`);
+  openDialog(signup ? '회원가입' : '로그인', `<p>로그인 후 어디가지를 이용할 수 있어요. 계정이 없다면 회원가입을 진행해 주세요.</p><form id="auth-form"><input type="hidden" name="mode" value="${mode}"><div class="stack"><label class="field">이메일<input type="email" name="email" required maxlength="254" autocomplete="email"></label><label class="field">비밀번호<input type="password" name="password" required minlength="8" maxlength="128" autocomplete="${signup ? 'new-password' : 'current-password'}"></label></div><div class="form-note">${signup ? '가입 후 인증 이메일을 확인한 다음 로그인해 주세요. 비밀번호는 브라우저 저장 공간에 보관하지 않습니다.' : 'Supabase에서 계정을 인증합니다. 비밀번호는 브라우저 저장 공간에 보관하지 않습니다.'}</div><p id="auth-error" class="form-error" role="alert"></p></form>`, `${btn(signup ? 'auth-login' : 'auth-signup', signup ? '로그인으로' : '회원가입', '', 'outline')}<button class="btn primary" type="submit" form="auth-form">${signup ? '가입하기' : '로그인'}</button>`, !state.user && !state.shared);
 }
 async function loadAccount() {
   const data = await api('/api/account'); state.profile = data.profile; state.saved = data.saved;
+  accountLoaded = true; lastWorkspace = '';
+  if (data.workspace) {
+    const w = data.workspace;
+    if (Array.isArray(w.seenPlaceIds)) state.seenPlaceIds = w.seenPlaceIds.filter(id => typeof id === 'string').slice(-120);
+    if (w.conditions) state.conditions = w.conditions;
+    if (Array.isArray(w.messages)) state.messages = w.messages;
+    if (w.course?.places?.length) acceptCourse(w.course);
+    if (w.planningMemory?.courseId === state.course?.id) state.planningMemory = w.planningMemory;
+  }
 }
 document.addEventListener('submit', async e => {
   if (e.target.id !== 'auth-form') return; e.preventDefault();
@@ -405,14 +480,18 @@ document.addEventListener('submit', async e => {
     const result = await api(`/api/auth/${data.get('mode')}`, { email: data.get('email').trim(), password: data.get('password') });
     e.target.reset();
     if (!result.user) { $('#auth-error').textContent = result.message; return; }
+    if (!state.shared) clearPrivateState();
     state.user = result.user; state.profile = null; state.saved = [];
-    try { await loadAccount(); } catch (err) { toast(`로그인은 완료됐지만 저장소 연결을 확인해야 해요. ${err.message}`); }
+    await loadAccount();
+    if (!state.shared) await ensurePlan();
     closeDialog(); render(); if (!state.profile) { draftProfile = {}; onboard(1); }
   } catch (err) { if ($('#auth-error')) $('#auth-error').textContent = err.message; }
   finally { if (submit.isConnected) submit.disabled = false; }
 });
 document.addEventListener('error', e => {
   if (e.target instanceof HTMLImageElement && e.target.matches('[data-place-photo]')) {
+    if (e.target.hasAttribute?.('data-real-photo')) { e.target.removeAttribute('data-real-photo'); e.target.src = 'https://images.unsplash.com/photo-1442512595331-e89e73853f31?auto=format&fit=crop&w=900&q=80'; e.target.alt = '예시 이미지 · 실제 장소 사진 아님'; return; }
+    if (!e.target.hasAttribute?.('data-local-fallback')) { e.target.setAttribute?.('data-local-fallback', ''); e.target.src = './place-example.svg'; e.target.alt = '예시 이미지 · 실제 장소 사진 아님'; return; }
     const replacement = document.createElement('span'); replacement.className = `${e.target.className} photo-placeholder`;
     replacement.setAttribute('role', 'img'); replacement.setAttribute('aria-label', '사진을 불러올 수 없어요');
     replacement.innerHTML = `${icon('pin')}<small>사진을 불러올 수 없어요</small>`; e.target.replaceWith(replacement);
@@ -427,4 +506,89 @@ window.addEventListener('eodigaji:back', () => {
 
 window.addEventListener('appinstalled', () => { window.eodigajiInstalled = true; document.querySelector('[data-action="install-app"]')?.remove(); });
 window.matchMedia?.('(display-mode: standalone)')?.addEventListener?.('change', () => render());
+
+let workspaceTimer, lastWorkspace = '', workspaceWriting = false, accountLoaded = false;
+let workspacePromise = Promise.resolve();
+const compactCourse = c => { if (!c) return null; const { recommendations, availablePlaces, ...rest } = c; return rest; };
+function scheduleWorkspace() {
+  if (!state.user || state.shared || !accountLoaded) return;
+  clearTimeout(workspaceTimer);
+  workspaceTimer = setTimeout(flushWorkspace, 400);
+}
+async function flushWorkspace() {
+  if (!state.user || state.shared || !accountLoaded) return;
+  if (workspaceWriting) { try { await workspacePromise; } catch {} return flushWorkspace(); }
+  const workspace = { planningMemory: state.planningMemory, seenPlaceIds: state.seenPlaceIds, conditions: state.conditions, course: compactCourse(state.course), messages: state.messages.map(m => ({ ...m, ...(m.course ? { course: compactCourse(m.course) } : {}) })) };
+  const value = JSON.stringify(workspace); if (value === lastWorkspace) return;
+  workspaceWriting = true; const owner = state.user.id;
+  try { workspacePromise = api('/api/workspace', { workspace }); await workspacePromise; if (state.user?.id === owner) lastWorkspace = value; }
+  catch (e) { toast('작업 내용 저장 실패: ' + e.message); }
+  finally { workspaceWriting = false; }
+}
+async function ensurePlan() {
+  if (!state.course) { const c = await api('/api/plan', state.conditions); acceptCourse(c); }
+  if (!state.places.length) state.places = state.course.availablePlaces || await api('/api/places?region=' + encodeURIComponent(state.conditions.region));
+}
+function blocks(course, editable = false) {
+  if (editable) updateSchedule(course);
+  return course.places.map((p, i) => `<article class="course-block" ${editable ? `draggable="true" data-block-index="${i}"` : ''}>
+    <div class="block-top"><span class="block-index">${i + 1}</span><strong>${esc(p.time || '')} · ${!editable && !state.shared ? `<button class="block-place-link" data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button>` : esc(p.name)}</strong>${editable ? `<span class="block-controls"><span class="drag-handle" title="드래그해서 순서 변경">⠿</span>${btn('block-up', '↑', '', 'outline', `data-index="${i}" aria-label="${i+1}번 장소 위로" ${i === 0 ? 'disabled' : ''}`)}${btn('block-down', '↓', '', 'outline', `data-index="${i}" aria-label="${i+1}번 장소 아래로" ${i === course.places.length-1 ? 'disabled' : ''}`)}${btn('block-remove', '삭제', '', 'ghost', `data-index="${i}"`)}</span>` : ''}</div>
+    <div class="block-body"><figure>${photo(p)}<figcaption>${p.photoUrl ? '장소 제공 사진 · 로딩 실패 시 예시 이미지' : '예시 이미지 · 실제 장소 사진 아님'}</figcaption></figure><div><p>${esc(p.category)} · ${esc(p.address || p.region)}</p>${editable ? `<div class="form-grid"><label class="field">체류 시간 (분)<input type="number" min="5" max="720" data-block-field="stay" data-index="${i}" value="${Number(p.stay) || 40}"></label><label class="field">예상 비용 (원)<input type="number" min="0" max="1000000" data-block-field="cost" data-index="${i}" value="${Number(p.cost) || 0}"></label></div><label class="field">메모<textarea maxlength="1000" data-block-field="note" data-index="${i}" placeholder="예약 시간, 하고 싶은 일 등">${esc(p.note || '')}</textarea></label>` : `<p>체류 ${Number(p.stay) || 0}분 · 1인 예상 ${won(p.cost)}</p>${p.note ? `<p class="block-note">${esc(p.note)}</p>` : ''}`}</div></div></article>${i < course.places.length - 1 ? `<div class="transport-block">↓ ${editable ? `<select aria-label="${i+1}번 구간 이동수단" data-block-field="transport" data-index="${i}">${['도보','자동차','대중교통'].map(m => `<option ${m === (p.transport || course.conditions.transport) ? 'selected' : ''}>${m}</option>`).join('')}</select><label>예상 <input aria-label="${i+1}번 구간 이동 시간" type="number" min="0" max="600" value="${course.places[i+1].travel || 10}" data-block-field="travelNext" data-index="${i}">분</label>` : `${esc(p.transport || course.conditions.transport)} 이동 · 약 ${Number(course.places[i+1].travel) || 0}분 (추정)`}</div>` : ''}`).join('');
+}
+function sharedPage(course) {
+  return greeting(esc(course.title), '링크를 받은 누구나 볼 수 있는 읽기 전용 코스입니다.', 'SHARED COURSE') + '<div class="shared-notice">읽기 전용 · 공유 시점에 저장된 코스 · 편집할 수 없어요</div><p>' + esc(course.conditions.date || '날짜 미정') + ' · ' + esc(course.conditions.region) + ' · 예상 ' + won(course.totalCost) + '</p><div class="block-list">' + blocks(course) + '</div>';
+}
+function editorPage() {
+  const c = state.editor;
+  const available = state.places.filter(p => !c.places.some(q => q.id === p.id));
+  return greeting('우리의 하루를 편집해요.', '⠿ 핸들을 드래그하거나 화살표로 장소 순서를 바꾸세요. 저장해야 변경이 반영됩니다.', 'COURSE EDITOR') + `<div class="detail-actions">${btn('save-edit','변경사항 저장','','primary')}${btn('cancel-edit','취소','','outline')}</div><div class="editor-heading"><label class="field">코스 제목<input id="editor-title" maxlength="200" value="${esc(c.title)}"></label><label class="field">시작 시간<input id="editor-start" type="time" value="${esc(c.conditions.start)}"></label></div><div class="block-list">${blocks(c, true)}</div><div class="block-add"><label class="field">검색 결과에서 장소 추가<select id="editor-place">${available.map(p => `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.category)}</option>`).join('')}</select></label>${btn('block-add','장소 추가','','outline', !available.length || c.places.length >= 12 ? 'disabled' : '')}</div><p class="form-note">이동시간은 직접 수정하는 예상값입니다. 순서를 바꾼 구간은 기본 10분으로 초기화됩니다. 장소는 2~12개로 구성할 수 있어요. 기존 공유 링크는 공유 시점의 코스를 유지합니다.</p>`;
+}
+function moveBlock(from, to) {
+  if (!state.editor || to < 0 || to >= state.editor.places.length || from === to) return;
+  const [p] = state.editor.places.splice(from, 1); state.editor.places.splice(to, 0, p);
+  state.editor.places.forEach((p, i) => { p.travel = i ? 10 : 0; }); render();
+}
+function updateSchedule(c) {
+  let minute = c.conditions.start.split(':').reduce((h, m) => Number(h) * 60 + Number(m)); const start = minute;
+  for (const [i, p] of c.places.entries()) {
+    if (i) minute += Number(p.travel) || 0;
+    p.time = `${String(Math.floor(minute / 60) % 24).padStart(2,'0')}:${String(minute % 60).padStart(2,'0')}`;
+    minute += Number(p.stay) || 0;
+  }
+  c.end = `${String(Math.floor(minute / 60) % 24).padStart(2,'0')}:${String(minute % 60).padStart(2,'0')}`;
+  c.minutes = minute - start; c.totalCost = c.places.reduce((n,p) => n + Number(p.cost || 0), 0);
+}
+async function saveEditor() {
+  if (!state.user || state.shared || !state.editor) return;
+  const c = structuredClone(state.editor);
+  if (!c.title.trim()) return toast('코스 제목을 입력해 주세요.');
+  updateSchedule(c); c.revision = (c.revision || 0) + 1;
+  try {
+    await api('/api/saved', { course: compactCourse(c) });
+    state.saved = state.saved.map(p => p.id === c.id ? c : p); acceptCourse(c); state.courseChosen = true; state.editor = null; render(); toast('코스 변경사항을 계정에 저장했어요.');
+  } catch(e) { toast(e.message); }
+}
+document.addEventListener('input', e => {
+  if (!state.editor) return;
+  if (e.target.id === 'editor-title') state.editor.title = e.target.value;
+  if (e.target.id === 'editor-start') state.editor.conditions.start = e.target.value || '14:00';
+  const field = e.target.dataset.blockField, i = Number(e.target.dataset.index);
+  if (!field) return;
+  if (field === 'travelNext') state.editor.places[i+1].travel = Math.max(0, Math.min(600, Number(e.target.value)));
+  else state.editor.places[i][field] = ['stay','cost'].includes(field) ? Math.max(field === 'stay' ? 5 : 0, Math.min(field === 'stay' ? 720 : 1000000, Number(e.target.value))) : e.target.value;
+});
+let draggedBlock = null;
+document.addEventListener('dragstart', e => {
+  const block = e.target.closest('[data-block-index]'); if (!block || !state.editor || e.target.closest('input, textarea, select')) return;
+  draggedBlock = Number(block.dataset.blockIndex); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(draggedBlock)); block.classList.add('dragging');
+});
+document.addEventListener('dragover', e => { const block = e.target.closest('[data-block-index]'); if (block && draggedBlock !== null) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } });
+document.addEventListener('drop', e => { const block = e.target.closest('[data-block-index]'); if (block && draggedBlock !== null) { e.preventDefault(); moveBlock(draggedBlock, Number(block.dataset.blockIndex)); draggedBlock = null; } });
+document.addEventListener('dragend', () => { draggedBlock = null; document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging')); });
+window.addEventListener('pagehide', () => { if (!state.user || state.shared || !accountLoaded || !state.course) return; const workspace = { planningMemory: state.planningMemory, seenPlaceIds: state.seenPlaceIds, conditions: state.conditions, course: compactCourse(state.course), messages: state.messages.map(m => ({ ...m, ...(m.course ? { course: compactCourse(m.course) } : {}) })) }; if (!window.EodigajiNative) navigator.sendBeacon?.('/api/workspace', new Blob([JSON.stringify({ workspace })], { type: 'application/json' })); });
+let pointerBlock = null;
+document.addEventListener('pointerdown', e => { if (!e.target.closest('.drag-handle') || !state.editor) return; e.preventDefault(); pointerBlock = Number(e.target.closest('[data-block-index]').dataset.blockIndex); e.target.setPointerCapture?.(e.pointerId); });
+document.addEventListener('pointermove', e => { if (pointerBlock !== null) { e.preventDefault(); document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target')); document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-block-index]')?.classList.add('drop-target'); } }, { passive: false });
+document.addEventListener('pointerup', e => { if (pointerBlock === null) return; const target = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-block-index]'); if (target) moveBlock(pointerBlock, Number(target.dataset.blockIndex)); pointerBlock = null; document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target')); });
+document.addEventListener('pointercancel', () => { pointerBlock = null; document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target')); });
 init();

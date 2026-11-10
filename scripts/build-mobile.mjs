@@ -22,3 +22,5 @@ await copyFile(resolve(root, 'public/favicon.svg'), resolve(outdir, 'favicon.svg
 console.log(`Mobile assets built: ${outdir}\nMode: ${config.apiBase ? 'HTTPS server' : 'offline sample (no PC server required)'}`);
 
 await copyFile(resolve(root, 'public/brand-logo.jpg'), resolve(outdir, 'brand-logo.jpg'));
+
+await copyFile(resolve(root, 'public/place-example.svg'), resolve(outdir, 'place-example.svg'));

@@ -24,7 +24,7 @@ test('auth tokens stay server-side and account queries use the authenticated own
   assert.equal(seen.at(-1).body.user_id, 'owner-a');
   const loginB = await post('/api/auth/login', { email: 'b@example.com', password: '12345678' });
   await fetch(url + '/api/account', { headers: { Cookie: loginB.headers.get('set-cookie').split(';')[0] } });
-  assert.equal(seen.at(-1).query, '?user_id=eq.owner-b&order=created_at.desc');
+  assert.equal(seen.findLast(row => row.table === 'saved_courses').query, '?user_id=eq.owner-b&order=created_at.desc');
   await post('/api/auth/logout', {}, cookie.split(';')[0]);
   assert.equal((await fetch(url + '/api/auth/user', { headers: { Cookie: cookie.split(';')[0] } }).then(r => r.json())).user, null);
 });

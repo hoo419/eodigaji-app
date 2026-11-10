@@ -7,7 +7,9 @@ function harness() {
  const handlers = {};
  const node = { addEventListener() {}, setAttribute() {} };
  class Img {
-  constructor(owned) { this.owned = owned; this.className = ''; this.replaced = false; }
+  constructor(owned) { this.owned = owned; this.className = ''; this.replaced = false; this.attributes = new Set(); }
+  hasAttribute(key) { return this.attributes.has(key); }
+  setAttribute(key) { this.attributes.add(key); }
   matches() { return this.owned; }
   replaceWith() { this.replaced = true; }
  }
@@ -21,5 +23,6 @@ test('Kakao tile errors leave SDK-managed images intact', () => {
 });
 test('app-owned photo errors still show a fallback', () => {
  const h = harness(); const photo = new h.Img(true);
+ h.handlers.error({ target: photo }); assert.equal(photo.src, './place-example.svg'); assert.equal(photo.replaced, false);
  h.handlers.error({ target: photo }); assert.equal(photo.replaced, true);
 });

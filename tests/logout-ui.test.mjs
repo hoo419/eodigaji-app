@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { readSharedCourse } from '../public/course-share.js';
 
 // Execute the actual UI handlers; only browser DOM and external API are substituted.
 function app({ logoutFails = false } = {}) {
@@ -11,7 +12,7 @@ function app({ logoutFails = false } = {}) {
     document: { querySelector: () => node, addEventListener: (name, fn) => (handlers[name] ??= []).push(fn) },
     window: { addEventListener() {}, location: { hash: '' } },
     localStorage: { getItem: key => key.endsWith('.profile') ? '{"name":"Old guest"}' : '[]' },
-    URLSearchParams, setTimeout: () => 0, clearTimeout() {},
+    URLSearchParams, readSharedCourse, setTimeout: () => 0, clearTimeout() {},
     icon: () => '',
     request: async path => {
       if (path === '/api/auth/logout' && logoutFails) throw new Error('Logout unavailable');
