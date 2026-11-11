@@ -7,7 +7,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { loadEnvFile } from 'node:process';
-import { places, planCourse, recommendCourses, parseMessage } from './lib/planner.mjs';
+import { places, planCourse, recommendCourses, parseMessage, normalize } from './lib/planner.mjs';
 import { createConnections } from './lib/connections.mjs';
 import { createSessions } from './lib/sessions.mjs';
 import { createRouting } from './lib/routing.mjs';
@@ -17,6 +17,7 @@ const assets = { '/': ['index.html', 'text/html'], '/index.html': ['index.html',
 assets['/brand-logo.jpg'] = ['brand-logo.jpg', 'image/jpeg'];
 assets['/live-map.js'] = ['live-map.js', 'text/javascript'];
 assets['/place-example.svg'] = ['place-example.svg', 'image/svg+xml'];
+assets['/course-timing.js'] = ['course-timing.js', 'text/javascript'];
 assets['/course-share.js'] = ['course-share.js', 'text/javascript'];
 for (const [file, type] of [['manifest.webmanifest', 'application/manifest+json'], ['sw.js', 'text/javascript'], ['pwa.js', 'text/javascript'], ['offline.html', 'text/html'], ['icon-192.png', 'image/png'], ['icon-512.png', 'image/png']]) assets[`/${file}`] = [file, type];
 function json(res, status, value) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); }
@@ -42,7 +43,7 @@ export function createApp({ env = process.env, connections = createConnections(e
   async function plan(input) {
     const { excludePlaceIds = [], ...conditions } = input;
     if (!Array.isArray(excludePlaceIds) || excludePlaceIds.length > 120 || excludePlaceIds.some(id => typeof id !== 'string' || id.length > 100)) throw new Error('이전 장소 정보를 확인해 주세요.');
-    const catalogue = status.places ? await connections.searchPlaces(conditions.region || '성수', { excludePlaceIds }) : places;
+    const catalogue = status.places ? await connections.searchPlaces(conditions.region || '성수', { excludePlaceIds, ...(Number.isFinite(conditions.destinationLat) && Number.isFinite(conditions.destinationLng) ? {center:{lat:conditions.destinationLat,lng:conditions.destinationLng}} : {}) }) : places;
     let recommendations;
     try { recommendations = recommendCourses(conditions, catalogue, { excludePlaceIds }); }
     catch (e) { if (excludePlaceIds.length && /조건에 맞는 코스/.test(e.message)) throw new Error('이전 장소를 제외하면 조건에 맞는 새 코스가 부족해요. 지역·예산·종류 조건을 바꿔 주세요. 이전 장소를 몰래 다시 넣지 않습니다.'); throw e; }
@@ -134,7 +135,7 @@ export function createApp({ env = process.env, connections = createConnections(e
         if (req.method === 'POST' && path === '/api/saved') {
           const body = await readJson(req);
           if (body.remove) { if (typeof body.remove !== 'string' || body.remove.length > 100) throw new Error('코스를 확인해 주세요.'); await connections.database('saved_courses', 'DELETE', session.token, q + `&course_id=eq.${encodeURIComponent(body.remove)}`); }
-          else { const c = snapshot(body.course); if (!c || typeof c.id !== 'string' || c.id.length > 100 || typeof c.title !== 'string' || c.title.length > 200 || !Array.isArray(c.places) || c.places.length > 12 || !c.conditions) throw new Error('저장할 코스 정보가 올바르지 않아요.'); await connections.database('saved_courses', 'POST', session.token, '?on_conflict=user_id,course_id', { user_id: session.user.id, course_id: c.id, data: c }); }
+          else { const c = snapshot(body.course); if (!c || typeof c.id !== 'string' || c.id.length > 100 || typeof c.title !== 'string' || c.title.length > 200 || !Array.isArray(c.places) || c.places.length > 144 || !c.conditions) throw new Error('저장할 코스 정보가 올바르지 않아요.'); await connections.database('saved_courses', 'POST', session.token, '?on_conflict=user_id,course_id', { user_id: session.user.id, course_id: c.id, data: c }); }
           return json(res, 200, { ok: true });
         }
         return json(res, 405, { error: '지원하지 않는 요청입니다.' });
@@ -155,6 +156,27 @@ export function createApp({ env = process.env, connections = createConnections(e
           if (!Array.isArray(history) || history.some(m => !m || !['user', 'assistant'].includes(m.role) || typeof m.text !== 'string')) throw new Error('대화 내역을 확인해 주세요.');
           aiCount++;
           let reply = await connections.interpret(message, retainedMemory.pendingConditions || conditions, history, existing ? { course: existing, catalogue, memory: retainedMemory } : null);
+          // Resolve named destinations online before asking the user for an address.
+          const pending = retainedMemory.destinationCandidates || [];
+          const choice = message.trim().match(/^(\d+)(?:번)?(?:으로|이요|요)?[.!]?$/);
+          const selected = choice ? pending[Number(choice[1])-1] : pending.find(p => message.trim() === p.name);
+          const named = reply.destinationQuery;
+          if (selected || (named && status.places && connections.resolveDestination)) {
+            let found;
+            try { found = selected ? [selected] : await connections.resolveDestination(named); }
+            catch { return json(res,200,{course:null,memory:retainedMemory,message:'장소 검색에 연결하지 못했어요. 잠시 후 장소 이름으로 다시 요청해 주세요. 현재 코스는 유지했어요.'}); }
+            if (!found.length) return json(res,200,{course:null,memory:retainedMemory,message:'온라인 장소 검색에서 일치하는 곳을 찾지 못했어요. 다른 표기나 지점명을 알려 주시겠어요?'});
+            if (found.length > 1) return json(res,200,{course:null,memory:{...retainedMemory,destinationCandidates:found},message:'동일하거나 비슷한 장소가 여러 곳이에요. 번호로 선택해 주세요.\n'+found.map((p,i)=>`${i+1}. ${p.name} · ${p.address}`).join('\n')});
+            const p = found[0];
+            const verified = normalize({...reply.conditions,region:p.region,destinationName:p.name,destinationAddress:p.address,destinationLat:p.lat,destinationLng:p.lng,destinationUrl:p.sourceUrl || ''});
+            return json(res,200,{course:null,conditions:verified,memory:{...retainedMemory,destinationCandidates:[],pendingConditions:verified},message:`${p.name} 위치를 찾았어요: ${p.address}. 이 장소를 기준으로 반경 3km 안의 주변 코스를 준비할게요.\n데이트와 여행 중 어떤 목적이고, 몇 시간·1인 예산 얼마로 구성할까요?`});
+          }
+          if (pending.length) return json(res,200,{course:null,memory:retainedMemory,message:'검색된 장소 중 번호나 정확한 이름을 골라 주세요.\n'+pending.map((p,i)=>`${i+1}. ${p.name} · ${p.address}`).join('\n')});
+          const confirmedDestination = retainedMemory.pendingConditions?.destinationName && /데이트|여행|시간|분|원|예산|추천|짜줘|만들|좋아|네|응/.test(message);
+          if (confirmedDestination) {
+            reply.conditions = normalize({...reply.conditions,region:retainedMemory.pendingConditions.region,...Object.fromEntries(['destinationName','destinationAddress','destinationUrl','destinationLat','destinationLng'].map(k=>[k,retainedMemory.pendingConditions[k]]))});
+            reply.operation='create'; reply.canPlan=true;
+          }
           if (existing && reply.operation === 'search') {
             if (!status.places || typeof reply.searchQuery !== 'string') return json(res, 200, { course: null, memory: retainedMemory, message: '장소 이름 검색 연결을 확인해 주세요. 현재 코스는 그대로 유지했어요.' });
             if (aiCount >= Number(env.AI_DAILY_LIMIT || 100)) return json(res, 429, { error: '오늘 설정한 AI 요청 한도에 도달했어요.' });
@@ -171,7 +193,8 @@ export function createApp({ env = process.env, connections = createConnections(e
             return json(res, 200, { ...result, conditions: result.course?.conditions || existing.conditions, provider: status.aiProvider });
           }
           if (existing && retainedMemory.lockedPlaceIds.length && !/유지.*(?:해제|취소)|고정.*(?:해제|풀|취소)|바꿔도/.test(message)) return json(res, 200, { course: null, memory: retainedMemory, message: '유지하기로 한 장소가 있어요. 기존 코스에서 나머지 장소만 바꿀까요, 유지 조건도 해제하고 새로 만들까요?' });
-          return json(res, 200, { message: reply.message, conditions: reply.conditions, course: reply.canPlan ? await plan({ ...reply.conditions, excludePlaceIds }) : null, provider: status.aiProvider });
+          const planned = reply.canPlan ? await plan({ ...reply.conditions, excludePlaceIds }) : null;
+          return json(res, 200, { message: reply.message, conditions: reply.conditions, course: planned, ...(planned ? {memory:planningMemory({...retainedMemory,pendingConditions:null,destinationCandidates:[]},planned)} : {}), provider: status.aiProvider });
         }
         // AI 키가 없을 때는 정규식 기반 체험 모드이며 실제 AI 응답이 아닙니다.
         const parsed = parseMessage(message, retainedMemory.pendingConditions || conditions);

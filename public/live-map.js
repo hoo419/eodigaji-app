@@ -15,17 +15,27 @@ export async function mountLiveMap(element, key, places, route, onSelect, routeD
   map = null;
   try {
     const maps = await sdk(key); if (!element.isConnected) return;
-    const points = route.filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+    const points = route.map((p,index) => ({...p, routeNumber:index+1})).filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
     const center = points[0] || { lat: 37.5445, lng: 127.0557 };
     map = new maps.Map(element, { center: new maps.LatLng(center.lat, center.lng), level: 5 });
     const bounds = new maps.LatLngBounds();
-    for (const [index, p] of points.entries()) {
-      const position = new maps.LatLng(p.lat, p.lng); bounds.extend(position);
-      const content = document.createElement('button');
-      content.className = 'route-marker'; content.textContent = String(index + 1); content.title = p.name;
-      content.setAttribute('aria-label', (index + 1) + '번 ' + p.name);
-      content.addEventListener('click', () => onSelect(p.id));
-      new maps.CustomOverlay({ map, position, content, yAnchor: 1 });
+    // Nearby entrances can share coordinates. Keep every stop selectable in one overlay.
+    const groups = [];
+    for (const p of points) {
+      const group = groups.find(g => Math.hypot((g[0].lat-p.lat)*111320, (g[0].lng-p.lng)*111320*Math.cos(p.lat*Math.PI/180)) < 25);
+      if (group) group.push(p); else groups.push([p]);
+    }
+    for (const group of groups) {
+      const position = new maps.LatLng(group[0].lat, group[0].lng);
+      const content = document.createElement('div'); content.className = 'route-marker-group';
+      for (const p of group) {
+        bounds.extend(new maps.LatLng(p.lat,p.lng));
+        const button = document.createElement('button');
+        button.className = 'route-marker'; button.textContent = String(p.routeNumber); button.title = p.name;
+        button.setAttribute('aria-label', p.routeNumber + '번 ' + p.name);
+        button.addEventListener('click', () => onSelect(p.id)); content.append(button);
+      }
+      new maps.CustomOverlay({ map, position, content, xAnchor: .5, yAnchor: 1, zIndex: 10 });
     }
     if (points.length > 1) map.setBounds(bounds, 110, 40, 110, 40);
     const path = route.filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng)).map(p => new maps.LatLng(p.lat, p.lng));

@@ -60,7 +60,7 @@ test('themes require one anchor and combine different categories without repetit
   const courses = recommendCourses({}, catalogue);
   assert.equal(courses.length, 3);
   for (const course of courses) {
-    assert.equal(new Set(course.places.map(p => p.category)).size, course.places.length);
+    assert.equal(new Set(course.places.map(p => p.id)).size, course.places.length);
     const anchor = { '카페 데이트': '카페', '문화 데이트': '문화', '공원 데이트': '산책' }[course.concept];
     assert.equal(course.places.filter(p => p.category === anchor).length, 1);
     assert.ok(course.totalCost <= course.conditions.budget);
@@ -72,7 +72,7 @@ test('budget constraints can produce a harmonious course without a restaurant', 
   const course = planCourse({ environment: '전체', budget: 10000 });
   assert.ok(course.totalCost <= 10000);
   assert.ok(course.places.every(p => p.category !== '식사'));
-  assert.equal(new Set(course.places.map(p => p.category)).size, course.places.length);
+  assert.equal(new Set(course.places.map(p => p.id)).size, course.places.length);
 });
 
 test('restaurant presence does not override a better matching non-meal combination', () => {

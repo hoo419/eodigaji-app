@@ -1,3 +1,4 @@
+import { allocateStayTimes, stayLimit } from './course-timing.js';
 import { icon } from './icons.js';
 import { mountLiveMap, zoomLiveMap } from './live-map.js';
 import { readSharedCourse } from './course-share.js';
@@ -13,7 +14,7 @@ function stored(key, fallback) { try { return JSON.parse(localStorage.getItem(`e
 const readProfile = stored('profile', null);
 const readSaved = stored('saved', []);
 // 화면 상태의 중심입니다. 상태를 바꾼 뒤 render()를 호출해 해당 화면을 다시 그립니다.
-const defaultConditions = () => ({ region: '성수', purpose: '데이트', budget: 50000, duration: 240, start: '14:00', date: dateISO, environment: '전체', mood: '여유로운', transport: '도보' });
+const defaultConditions = () => ({ region: '성수', purpose: '데이트', partySize: 2, budget: 50000, duration: 240, start: '14:00', date: dateISO, environment: '전체', mood: '여유로운', transport: '도보' });
 const state = {
   config: { ai: false, places: false, map: false, auth: false }, user: null,
   tab: 'explore', view: 'map', filter: '전체', query: '', zoom: 1, places: [], course: null, selected: null, recommendations: [], courseChosen: false, mapExpanded: false, routeMode: null, routeDetails: null, routeBusy: false,
@@ -112,11 +113,12 @@ function explore() {
     ${(c.categories?.length || c.excludedCategories?.length || (c.mood === '로맨틱한' && !c.includeMeals)) ? `<p class="constraint-note">${c.categories?.length ? esc(c.categories.join('·')) + '만 추천' : c.mood === '로맨틱한' && !c.includeMeals ? '로맨틱 데이트 · 카페만 (식사 요청 시 포함)' : ''}${c.excludedCategories?.length ? ' · ' + esc(c.excludedCategories.join('·')) + ' 제외' : ''}</p>` : ''}<div class="explore-toolbar"><div class="segment" role="group" aria-label="탐색 방식"><button data-action="view" data-view="map" class="${state.view === 'map' ? 'active' : ''}" aria-pressed="${state.view === 'map'}">${icon('map')}지도 탐색</button><button data-action="view" data-view="chat" class="${state.view === 'chat' ? 'active' : ''}" aria-pressed="${state.view === 'chat'}">${icon('spark')}AI와 계획하기</button></div><span class="toolbar-note">어디로 갈지 고민되는 순간, 어디가지</span></div>
     <div class="explore-grid ${state.view === 'chat' ? 'chat-layout' : ''}">${state.view === 'chat' ? chatPanel() : discovery()}${mapPanel()}</div><p class="sample-foot">샘플 체험 · 장소·사진·영업시간·비용·이동 경로는 시연용 예시입니다. 실제 AI 및 지도 서비스는 아직 연결되지 않았습니다.</p>`;
 }
+function groupSummary(course) { return course.conditions.purpose === '여행' ? `<span class="group-summary">여행 ${Number(course.conditions.partySize) || 2}명 · 전체 예상 ${won(course.totalCost * (Number(course.conditions.partySize) || 2))}</span>` : ''; }
 function courseCard(course, saved = false) {
   const c = course.conditions;
-  return `<article class="course-card"><div class="course-image">${photo(course.places[0])}<span class="photo-badge">${icon('spark')} ${esc(c.mood)} ${esc(c.purpose)}</span><button class="save-float ${isSaved(course) ? 'saved' : ''}" data-action="save" data-id="${esc(course.id)}" aria-label="${isSaved(course) ? '저장됨' : '코스 저장'}" aria-pressed="${isSaved(course)}">${icon('heart')}</button>${isSaved(course) ? '<span class="saved-state">♥ 저장됨</span>' : ''}<span class="photo-caption">분위기 참고 이미지</span></div>
-    <div class="course-body"><div class="row"><span class="tag blue">${esc(c.region)}</span><span class="tag">${esc(c.environment === '전체' ? '실내 + 실외' : c.environment)}</span><span class="tag">${esc(c.transport)}</span></div><h3>${esc(course.title)}</h3><p>${c.purpose === '데이트' ? '서로에게 조금 더 집중할 수 있도록,' : '동네의 새로운 모습을 만날 수 있도록,'}<br>취향에 맞는 ${course.places.length}곳을 하나의 하루로 이었어요.</p>
-    <div class="mini-route">${course.places.map((p, i) => `${i ? icon('chevron') : ''}<b>${esc(p.category)}</b>`).join('')}</div><div class="course-stats"><span class="row">${icon('clock')}${length(course.minutes)}</span><span class="row">${icon('wallet')}1인 ${course.estimated ? '예상 ' : ''}${won(course.totalCost)}</span><span class="row">${icon('pin')}${course.places.length}곳</span></div>
+  return `<article class="course-card"><div class="course-image">${photo(course.places[0])}<span class="photo-badge">${icon('spark')} ${esc(c.mood)} ${esc(c.purpose)}</span><div class="course-save-control"><button class="save-float ${isSaved(course) ? 'saved' : ''}" data-action="save" data-id="${esc(course.id)}" aria-label="${isSaved(course) ? '저장됨' : '코스 저장'}" aria-pressed="${isSaved(course)}">${icon('heart')}</button>${isSaved(course) ? '<span class="saved-state">♥ 저장됨</span>' : ''}</div><span class="photo-caption">분위기 참고 이미지</span></div>
+    <div class="course-body"><div class="row"><span class="tag blue">${esc(c.region)}</span>${c.purpose === '여행' ? `<span class="tag">${Number(c.partySize) || 2}명</span>` : ''}<span class="tag">${esc(c.environment === '전체' ? '실내 + 실외' : c.environment)}</span><span class="tag">${esc(c.transport)}</span></div><h3>${esc(course.title)}</h3><p>${c.purpose === '데이트' ? '서로에게 조금 더 집중할 수 있도록,' : '동네의 새로운 모습을 만날 수 있도록,'}<br>취향에 맞는 ${course.places.length}곳을 하나의 하루로 이었어요.</p>
+    <div class="mini-route">${course.places.map((p, i) => `${i ? icon('chevron') : ''}<b>${esc(p.category)}</b>`).join('')}</div><div class="course-stats"><span class="row">${icon('clock')}${length(course.minutes)}</span><span class="row">${icon('wallet')}1인 ${course.estimated ? '예상 ' : ''}${won(course.totalCost)}</span><span class="row">${icon('pin')}${course.places.length}곳</span>${groupSummary(course)}</div>
     ${saved ? `<div class="saved-actions">${btn('course', '코스 다시 보기', 'arrow', 'primary', `data-id="${esc(course.id)}"`)}${btn('edit-course', '블록 수정', '', 'outline', `data-id="${esc(course.id)}"`)}${actionIcon('remove-saved', 'trash', '저장한 코스 삭제', `data-id="${esc(course.id)}"`)}</div>` : btn('course', '우리의 코스 자세히 보기', 'arrow', 'primary full', `data-id="${esc(course.id)}"`)}</div></article>`;
 }
 function discovery() {
@@ -140,7 +142,19 @@ async function loadCourseRoute(mode) {
   if (course.demo) return;
   try {
     const result=await api('/api/route',{mode,points:course.places.map(p=>({name:p.name,lat:p.lat,lng:p.lng}))});
-    if(state.course?.id===course.id && state.routeMode===mode) state.routeDetails=result;
+    if(state.course?.id===course.id && state.routeMode===mode) {
+      state.routeDetails=result;
+      course.conditions.transport = mode;
+      course.places.forEach(p => { p.transport = mode; });
+      result.legs.forEach((leg,i) => { if (leg.actual) Object.assign(course.places[i+1], {travel:leg.minutes,travelDistance:leg.distance,travelActual:true,travelBasis:'카카오 길찾기 조회 결과'}); });
+      if (course.timingMode === 'proportional') {
+        const travel = course.places.slice(1).reduce((n,p) => n + p.travel,0);
+        try { course.places = allocateStayTimes(course.places, course.conditions.duration, travel); }
+        catch (e) { toast(e.message); }
+      }
+      updateSchedule(course);
+      course.revision = (course.revision || 0) + 1;
+    }
   } catch {}
   finally { if(state.course?.id===course.id && state.routeMode===mode){state.routeBusy=false;render();} }
 }
@@ -148,7 +162,7 @@ function coursePage() {
   const course = state.course;
   if (state.shared) return sharedPage(course);
   if (!course) { state.tab = 'explore'; return explore(); }
-  return greeting(esc(course.concept || course.title), '선택한 장소와 방문 순서를 한눈에 확인하세요.', 'OUR DATE ROUTE') + '<div class="detail-actions">' + btn('edit-with-ai', '대화로 코스 수정', 'spark', 'primary') + btn('other-courses', '다른 코스 선택', 'back', 'outline') + btn('refresh-courses', '다른 코스 추천', '', 'outline', state.busy ? 'disabled' : '') + btn('save', hasSavedChanges(course) ? '변경사항 저장' : isSaved(course) ? '♥ 저장됨' : '코스 저장', 'heart', 'primary', 'data-id="' + esc(course.id) + '"') + btn('share', 'URL 복사', 'share', 'outline', 'data-id="' + esc(course.id) + '"') + (isSaved(course) ? btn('edit-course', '블록으로 수정', '', 'outline', 'data-id="' + esc(course.id) + '"') : '') + '</div><div class="course-detail-grid"><section class="route-detail"><div class="detail-summary"><span>추천 일정 추정 (' + esc(course.conditions.transport) + ') ' + length(course.minutes) + '</span><span>1인 예상 ' + won(course.totalCost) + '</span><span>' + esc(course.conditions.start) + '–' + esc(course.end) + '</span></div><div class="block-list">' + blocks(course) + '</div></section>' + mapPanel() + '</div><p class="sample-foot">예상 일정 · 실제 길찾기와 영업 여부는 방문 전에 확인하세요.</p>';
+  return greeting(esc(course.concept || course.title), '선택한 장소와 방문 순서를 한눈에 확인하세요.', 'OUR DATE ROUTE') + '<div class="detail-actions">' + btn('edit-with-ai', '대화로 코스 수정', 'spark', 'primary') + btn('other-courses', '다른 코스 선택', 'back', 'outline') + btn('refresh-courses', '다른 코스 추천', '', 'outline', state.busy ? 'disabled' : '') + btn('save', hasSavedChanges(course) ? '변경사항 저장' : isSaved(course) ? '♥ 저장됨' : '코스 저장', 'heart', 'primary', 'data-id="' + esc(course.id) + '"') + btn('share', 'URL 복사', 'share', 'outline', 'data-id="' + esc(course.id) + '"') + (isSaved(course) ? btn('edit-course', '블록으로 수정', '', 'outline', 'data-id="' + esc(course.id) + '"') : '') + '</div><div class="course-detail-grid"><section class="route-detail"><div class="detail-summary"><span>추천 일정 추정 (' + esc(course.conditions.transport) + ') ' + length(course.minutes) + '</span><span>1인 예상 ' + won(course.totalCost) + '</span><span>' + esc(course.conditions.start) + '–' + esc(course.end) + '</span>' + groupSummary(course) + '</div><div class="block-list">' + blocks(course) + '</div></section>' + mapPanel() + '</div><p class="sample-foot">예상 일정 · 실제 길찾기와 영업 여부는 방문 전에 확인하세요.</p>';
 }
 function miniPlace(p) { return `<button class="mini-place" data-action="place" data-id="${esc(p.id)}"><span class="thumb">${photo(p)}</span><span><small>${esc(p.category)} · ${esc(p.region)}</small><h3>${esc(p.name)}</h3><p>${esc(p.environment)} · ${p.estimated ? '예상 ' : ''}${won(p.cost)}</p></span>${icon('chevron')}</button>`; }
 function filteredPlaces() { return state.places.filter(p => p.region === state.conditions.region && (state.filter === '전체' || p.category === state.filter) && `${p.name} ${p.category} ${p.description} ${p.region}`.includes(state.query)); }
@@ -171,12 +185,13 @@ function mapArt() {
 }
 function conversationContext() {
   if (!state.course) return '';
-  return `<div class="conversation-context"><strong>지금 수정하는 코스</strong><ol>${state.course.places.map(p => `<li>${esc(p.name)}${state.planningMemory.lockedPlaceIds?.includes(p.id) ? '<span class="tag">유지</span>' : ''}</li>`).join('')}</ol>${state.planningMemory.preferences?.length ? `<small>요청한 취향: ${state.planningMemory.preferences.map(esc).join(' · ')} (확인되지 않은 정보는 보장하지 않아요)</small>` : ''}${state.planningMemory.history?.length ? `<details><summary>최근 변경 기록</summary><ul>${state.planningMemory.history.slice(-5).map(text => `<li>${esc(text)}</li>`).join('')}</ul></details>` : ''}${state.planningMemory.pendingConditions ? '<p>새 조건과 충돌하여 코스는 유지 중이에요. 다음 대화에서 조정해 주세요.</p>' : ''}${btn('save', hasSavedChanges(state.course) ? '변경사항 저장' : isSaved(state.course) ? '♥ 저장됨' : '코스 저장', 'heart', 'outline', `data-id="${esc(state.course.id)}"`)}${state.previousPlan ? btn('undo-chat-edit', '직전 변경 되돌리기', '', 'outline') : ''}</div>`;
+  return `<div class="conversation-context"><strong>지금 수정하는 코스</strong><ol>${state.course.places.map(p => `<li>${esc(p.name)}${state.planningMemory.lockedPlaceIds?.includes(p.id) ? '<span class="tag">유지</span>' : ''}</li>`).join('')}</ol>${state.planningMemory.preferences?.length ? `<small>요청한 취향: ${state.planningMemory.preferences.map(esc).join(' · ')} (확인되지 않은 정보는 보장하지 않아요)</small>` : ''}${state.planningMemory.history?.length ? `<details><summary>최근 변경 기록</summary><ul>${state.planningMemory.history.slice(-5).map(text => `<li>${esc(text)}</li>`).join('')}</ul></details>` : ''}${state.planningMemory.pendingConditions ? '<p>새 조건과 충돌하여 코스는 유지 중이에요. 다음 대화에서 조정해 주세요.</p>' : ''}<div class="conversation-actions">${btn('save', hasSavedChanges(state.course) ? '변경사항 저장' : isSaved(state.course) ? '♥ 저장됨' : '코스 저장', 'heart', 'outline', `data-id="${esc(state.course.id)}"`)}${state.previousPlan ? btn('undo-chat-edit', '직전 변경 되돌리기', '', 'outline') : ''}</div></div>`;
 }
 function chatPanel() {
   return `<section class="chat-panel" aria-label="AI 코스 계획 체험"><div class="chat-heading"><div class="row"><span class="ai-avatar">${icon('spark')}</span><strong>우리의 하루를 함께 계획해요</strong></div><p>샘플 대화 체험 · 입력한 조건을 코스에 반영해요</p></div>${conversationContext()}<div class="messages" aria-live="polite" aria-label="대화 내역">${state.messages.map(m => `<div class="bubble ${m.role === 'user' ? 'user' : ''}">${esc(m.text)}</div>${m.course ? `<div class="chat-route"><h3>${esc(m.course.title)}</h3><p>${m.course.places.map(p => esc(p.name)).join(' → ')}</p>${btn('chat-course', '이 코스를 지도에서 보기', 'map', '', `data-id="${esc(m.course.id)}" data-revision="${m.course.revision || 0}"`)}</div>` : ''}`).join('')}${state.chatting ? '<div class="bubble" role="status">조건에 맞는 하루를 찾고 있어요…</div>' : ''}</div><div class="suggestions">${['두 번째 장소는 유지해줘', '이동을 최소로 해줘', '식당은 제외해줘'].map(x => `<button data-action="suggest" data-message="${x}" ${state.chatting ? 'disabled' : ''}>${x}</button>`).join('')}</div><form id="chat-form" class="chat-compose"><textarea id="chat-input" name="message" placeholder="예: 두 번째 장소는 유지하고 식당만 바꿔줘" aria-label="데이트 요청 메시지" maxlength="1500" required ${state.chatting ? 'disabled' : ''}></textarea><button aria-label="메시지 보내기" ${state.chatting ? 'disabled' : ''}>${icon('arrow')}</button></form><p class="chat-note">현재 코스를 기준으로 수정합니다. 저장 버튼을 눌러야 저장한 코스에 반영됩니다.</p></section>`;
 }
-function savedPage() { return `${greeting('다음에 함께 가요.', '마음에 든 하루를 모아 두었어요. 언제든 다시 꺼내 보세요.', 'OUR LITTLE COLLECTION')}${state.saved.length ? `<div class="saved-grid">${state.saved.map(c => courseCard(c, true)).join('')}</div>` : `<div class="empty-state">${icon('heart')}<h2>아직 저장한 코스가 없어요.</h2><p>마음에 드는 코스의 하트를 눌러 주세요.<br>우리의 다음 데이트가 여기에 모여요.</p>${btn('nav', '첫 번째 코스 찾아보기', 'arrow', 'primary', 'data-tab="explore"')}</div>`}`; }
+function timeNotice(c) { const left = Math.max(0, Math.round(c.conditions.duration - c.minutes)); return left ? `<aside class="remaining-time" role="status">${esc(c.title)} · ${left <= 60 ? '여유 시간' : '남은 시간'} ${length(left)}</aside>` : ''; }
+function savedPage() { return `${greeting('다음에 함께 가요.', '마음에 든 하루를 모아 두었어요. 언제든 다시 꺼내 보세요.', 'OUR LITTLE COLLECTION')}${state.saved.length ? `<div class="saved-grid">${state.saved.map(c => courseCard(c, true)).join('')}</div><div class="saved-time-notices">${state.saved.map(timeNotice).join('')}</div>` : `<div class="empty-state">${icon('heart')}<h2>아직 저장한 코스가 없어요.</h2><p>마음에 드는 코스의 하트를 눌러 주세요.<br>우리의 다음 데이트가 여기에 모여요.</p>${btn('nav', '첫 번째 코스 찾아보기', 'arrow', 'primary', 'data-tab="explore"')}</div>`}`; }
 function profilePage() {
   const p = state.profile;
   return `${greeting('우리의 취향을 알아가는 곳.', '취향을 남겨 두면 다음 계획을 시작하기가 조금 더 쉬워져요.', 'A LITTLE MORE ABOUT YOU')}<div class="profile-grid"><section class="profile-card"><div class="avatar">${esc(p?.name?.slice(0, 1) || '나')}</div><h2>${esc(p?.name || '반가워요, 여행자')}님</h2><p>${p ? '이 브라우저에 저장된 체험 프로필입니다.' : '프로필을 만들고 우리만의 취향을 남겨 보세요.'}</p><dl class="profile-info">${[['나이', p?.age ? `${p.age}세` : '선택하지 않음'], ['성별', p?.gender || '선택하지 않음'], ['성격', p?.personality || '선택하지 않음'], ['MBTI', p?.mbti || '선택하지 않음'], ['관심사', p?.interests?.join(', ') || '선택하지 않음']].map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>${btn(p ? 'edit-profile' : 'onboard', p ? '취향 프로필 수정' : '내 취향으로 시작하기', 'user', 'primary full')}</section><section class="profile-card"><h2 style="font-size:18px">이용 안내</h2><div class="info-line"><strong>베타 체험 모드</strong><p>실제 회원가입 없이 프로필과 추천 흐름을 체험할 수 있어요. 코스와 장소는 샘플이며 실제 예약·운영 정보가 아닙니다.</p></div><div class="info-line"><strong>위치 설정</strong><p>${esc(p?.location || '지역을 직접 선택하고 있어요.')}<br>정확한 위치는 저장하지 않습니다.</p>${btn('location', '위치 권한 설정', 'target', 'outline')}</div><div class="info-line"><strong>저장 공간</strong><p>프로필과 저장한 코스는 이 브라우저에만 저장됩니다. 다른 기기와 동기화되지 않습니다.</p></div>${btn('reset-confirm', '내 체험 데이터 초기화', 'trash', 'ghost danger')}</section></div>`;
@@ -185,6 +200,7 @@ function profilePage() {
 const dialog = $('#dialog');
 function openDialog(title, body, footer = '', locked = false) {
   loginDialogLocked = locked;
+  dialog.className = body.includes('id="auth-form"') ? 'auth-dialog' : '';
   modalReturn = document.activeElement;
   dialog.innerHTML = `<div class="dialog-head"><h2 id="dialog-title">${title}</h2>${locked ? '' : actionIcon('close', 'close', '닫기')}</div><div class="dialog-body">${body}</div>${footer ? `<div class="dialog-actions">${footer}</div>` : ''}`;
   if (!dialog.open) dialog.showModal();
@@ -197,7 +213,7 @@ dialog.addEventListener('click', e => { if (e.target === dialog) { const r = dia
 function selectField(name, label, values, current) { return `<label class="field">${label}<select name="${name}">${values.map(v => { const [value, text] = Array.isArray(v) ? v : [v, v]; return `<option value="${esc(value)}" ${String(value) === String(current) ? 'selected' : ''}>${esc(text)}</option>`; }).join('')}</select></label>`; }
 function filtersDialog() {
   const c = state.conditions;
-  openDialog('어떤 하루를 만들까요?', `<p>이번 데이트에 맞는 조건을 골라 주세요.<br>부담 없는 예산과 편안한 동선부터 시작해요.</p><form id="conditions-form"><div class="form-grid"><label class="field">희망 지역<input name="region" type="text" maxlength="60" value="${esc(c.region)}" placeholder="예: 부산 해운대, 수원 행궁동, 제주 애월" required></label>${selectField('purpose', '오늘의 목적', ['데이트', '여행'], c.purpose)}<label class="field">날짜<input name="date" type="date" value="${esc(c.date)}" required></label><label class="field">시작 시간<input name="start" type="time" value="${esc(c.start)}" required></label>${selectField('duration', '함께할 시간', [[120, '2시간'], [180, '3시간'], [240, '4시간'], [360, '6시간']], c.duration)}<label class="field">1인당 예산 (원)<input name="budget" type="number" min="0" max="1000000" step="500" value="${c.budget}" required></label>${selectField('mood', '선호 분위기', ['여유로운', '감성적인', '로맨틱한', '활동적인'], c.mood)}${selectField('transport', '이동수단', ['도보', '대중교통', '자동차'], c.transport)}${selectField('environment', '실내 · 실외', [['전체', '상관없어요'], '실내', '실외'], c.environment)}</div><div class="form-note">시·군·구나 동네 이름을 입력해 주세요. 실제 장소 검색은 국내 지역을 지원하며, 샘플 모드에서는 성수·연남·해방촌만 이용할 수 있어요. 영업 여부와 교통 상황은 반영되지 않습니다.</div><p id="form-error" class="form-error" role="alert"></p></form>`, `<button class="btn primary" type="submit" form="conditions-form">${icon('spark')}이 조건으로 코스 찾기</button>`);
+  openDialog('어떤 하루를 만들까요?', `<p>이번 데이트에 맞는 조건을 골라 주세요.<br>부담 없는 예산과 편안한 동선부터 시작해요.</p><form id="conditions-form"><div class="form-grid"><label class="field">희망 지역<input name="region" type="text" maxlength="60" value="${esc(c.region)}" placeholder="예: 부산 해운대, 수원 행궁동, 제주 애월" required></label>${selectField('purpose', '오늘의 목적', ['데이트', '여행'], c.purpose)}<label class="field" id="trip-party-field" ${c.purpose !== '여행' ? 'hidden' : ''}>여행 인원 (본인 포함)<input name="partySize" type="number" min="1" max="100" step="1" value="${Number(c.partySize) || 2}" ${c.purpose !== '여행' ? 'disabled' : ''} required><small>예산은 1인 기준이며 전체 예상 비용을 함께 표시해요.</small></label><label class="field">날짜<input name="date" type="date" value="${esc(c.date)}" required></label><label class="field">시작 시간<input name="start" type="time" value="${esc(c.start)}" required></label>${selectField('duration', '함께할 시간', [[120, '2시간'], [180, '3시간'], [240, '4시간'], [360, '6시간']], c.duration)}<label class="field">1인당 예산 (원)<input name="budget" type="number" min="0" max="1000000" step="500" value="${c.budget}" required></label>${selectField('mood', '선호 분위기', ['여유로운', '감성적인', '로맨틱한', '활동적인'], c.mood)}${selectField('transport', '이동수단', ['도보', '대중교통', '자동차'], c.transport)}${selectField('environment', '실내 · 실외', [['전체', '상관없어요'], '실내', '실외'], c.environment)}</div><div class="form-note">시·군·구나 동네 이름을 입력해 주세요. 실제 장소 검색은 국내 지역을 지원하며, 샘플 모드에서는 성수·연남·해방촌만 이용할 수 있어요. 영업 여부와 교통 상황은 반영되지 않습니다.</div><p id="form-error" class="form-error" role="alert"></p></form>`, `<button class="btn primary" type="submit" form="conditions-form">${icon('spark')}이 조건으로 코스 찾기</button>`);
 }
 function lookupCourse(id, revision) { if (revision !== undefined) { const match = state.messages.map(m => m.course).find(c => c && c.id === id && String(c.revision || 0) === String(revision)); if (match) return match; } return [state.course, ...state.saved, ...state.recommendations, ...state.messages.map(m => m.course)].find(c => c && c.id === id) || state.course; }
 function courseDialog(course) {
@@ -356,7 +372,7 @@ document.addEventListener('click', async e => {
   if (action === 'save-edit') { await saveEditor(); return; }
   if (action === 'block-up' || action === 'block-down') { moveBlock(Number(target.dataset.index), Number(target.dataset.index) + (action === 'block-up' ? -1 : 1)); return; }
   if (action === 'block-remove') { if (state.editor.places.length <= 2) return toast('코스에는 장소가 2개 이상 필요해요.'); state.editor.places.splice(Number(target.dataset.index), 1); render(); return; }
-  if (action === 'block-add') { const p = state.places.find(p => p.id === $('#editor-place').value); if (p && state.editor.places.length < 12) { state.editor.places.push({ ...structuredClone(p), travel: 10 }); render(); } return; }
+  if (action === 'block-add') { const p = state.places.find(p => p.id === $('#editor-place').value); if (p && state.editor.places.length < Math.floor(state.editor.conditions.duration / 5)) { state.editor.places.push({ ...structuredClone(p), travel: 10 }); render(); } return; }
   if (action === 'close') closeDialog();
   if (action === 'nav') { state.editor = null; state.tab = target.dataset.tab; render(); window.scrollTo(0, 0); }
   if (action === 'view') { state.view = target.dataset.view; if (state.view === 'chat' && state.course) state.courseChosen = true; state.tab = 'explore'; render(); }
@@ -398,6 +414,13 @@ document.addEventListener('click', async e => {
   if (action === 'reset') { state.profile = null; state.saved = []; draftProfile = {}; persist('profile', null); persist('saved', []); closeDialog(); render(); toast('프로필과 저장한 코스를 초기화했어요.'); }
   if (action === 'about') openDialog('어디가지 베타 · 체험 안내', '<h3 class="intro-title">대화로 찾는<br>우리만의 다음 목적지.</h3><p>지도 탐색, 대화형 코스 추천, 성향 조사, 코스 저장을 미리 경험하는 시제품입니다.</p><div class="info-line"><strong>지금 작동하는 기능</strong><p>조건별 샘플 코스 생성, 조건을 해석하는 규칙 기반 대화, 장소 검색, 지도 확대, 코스 상세, 브라우저 저장과 텍스트 공유</p></div><div class="info-line"><strong>실서비스 연결 전인 기능</strong><p>실제 회원 인증, 대규모 언어 모델 AI, 실제 지도·영업정보·교통 경로, 클라우드 동기화</p></div><div class="info-line"><strong>서버 운영</strong><p>현재 PC의 로컬 Node 서버에서 실행됩니다. 외부 사용자에게 공개되거나 클라우드에 배포된 상태가 아닙니다.</p></div>', btn('close', '확인했어요', '', 'primary'));
 });
+document.addEventListener('change', e => {
+  if (e.target.name !== 'purpose' || e.target.form?.id !== 'conditions-form') return;
+  const field = e.target.form.querySelector('#trip-party-field');
+  if (!field) return;
+  const travel = e.target.value === '여행'; field.hidden = !travel;
+  field.querySelector('input').disabled = !travel;
+});
 document.addEventListener('input', e => { if (e.target.id === 'map-search') { state.query = e.target.value; $('#map-render').innerHTML = mapArt(); refreshLiveMap(); const d = $('.discovery'); if (d) d.outerHTML = discovery(); } });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && state.mapExpanded) { state.mapExpanded = false; render(); } if (e.target.id === 'chat-input' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#chat-form').requestSubmit(); } });
 document.addEventListener('submit', async e => {
@@ -412,7 +435,8 @@ document.addEventListener('submit', async e => {
     else { if (draftProfile.interests.includes('전시')) state.conditions.mood = '감성적인'; else if (draftProfile.personality === '차분한 편') state.conditions.mood = '여유로운'; onboard(2); }
   }
   if (e.target.id === 'conditions-form' && !state.busy) {
-    const conditions = { ...state.conditions, ...Object.fromEntries(new FormData(e.target)) }; state.busy = true;
+    const conditions = { ...state.conditions, ...Object.fromEntries(new FormData(e.target)) };
+    conditions.partySize = conditions.purpose === '여행' ? Number(conditions.partySize || 2) : 2; state.busy = true;
     const submit = dialog.querySelector('[type="submit"]'); submit.disabled = true; submit.textContent = '코스를 찾고 있어요…';
     try { const course = await api('/api/plan', { ...conditions, excludePlaceIds: state.seenPlaceIds }); acceptCourse(course); state.query = ''; state.filter = '전체'; state.selected = null; state.tab = 'explore'; closeDialog(); render(); toast('선택한 조건으로 코스를 준비했어요.'); }
     catch (err) { if ($('#form-error')) $('#form-error').textContent = err.message; }
@@ -533,20 +557,20 @@ function blocks(course, editable = false) {
   if (editable) updateSchedule(course);
   return course.places.map((p, i) => `<article class="course-block" ${editable ? `draggable="true" data-block-index="${i}"` : ''}>
     <div class="block-top"><span class="block-index">${i + 1}</span><strong>${esc(p.time || '')} · ${!editable && !state.shared ? `<button class="block-place-link" data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button>` : esc(p.name)}</strong>${editable ? `<span class="block-controls"><span class="drag-handle" title="드래그해서 순서 변경">⠿</span>${btn('block-up', '↑', '', 'outline', `data-index="${i}" aria-label="${i+1}번 장소 위로" ${i === 0 ? 'disabled' : ''}`)}${btn('block-down', '↓', '', 'outline', `data-index="${i}" aria-label="${i+1}번 장소 아래로" ${i === course.places.length-1 ? 'disabled' : ''}`)}${btn('block-remove', '삭제', '', 'ghost', `data-index="${i}"`)}</span>` : ''}</div>
-    <div class="block-body"><figure>${photo(p)}<figcaption>${p.photoUrl ? '장소 제공 사진 · 로딩 실패 시 예시 이미지' : '예시 이미지 · 실제 장소 사진 아님'}</figcaption></figure><div><p>${esc(p.category)} · ${esc(p.address || p.region)}</p>${editable ? `<div class="form-grid"><label class="field">체류 시간 (분)<input type="number" min="5" max="720" data-block-field="stay" data-index="${i}" value="${Number(p.stay) || 40}"></label><label class="field">예상 비용 (원)<input type="number" min="0" max="1000000" data-block-field="cost" data-index="${i}" value="${Number(p.cost) || 0}"></label></div><label class="field">메모<textarea maxlength="1000" data-block-field="note" data-index="${i}" placeholder="예약 시간, 하고 싶은 일 등">${esc(p.note || '')}</textarea></label>` : `<p>체류 ${Number(p.stay) || 0}분 · 1인 예상 ${won(p.cost)}</p>${p.note ? `<p class="block-note">${esc(p.note)}</p>` : ''}`}</div></div></article>${i < course.places.length - 1 ? `<div class="transport-block">↓ ${editable ? `<select aria-label="${i+1}번 구간 이동수단" data-block-field="transport" data-index="${i}">${['도보','자동차','대중교통'].map(m => `<option ${m === (p.transport || course.conditions.transport) ? 'selected' : ''}>${m}</option>`).join('')}</select><label>예상 <input aria-label="${i+1}번 구간 이동 시간" type="number" min="0" max="600" value="${course.places[i+1].travel || 10}" data-block-field="travelNext" data-index="${i}">분</label>` : `${esc(p.transport || course.conditions.transport)} 이동 · 약 ${Number(course.places[i+1].travel) || 0}분 (추정)`}</div>` : ''}`).join('');
+    <div class="block-body"><figure>${photo(p)}<figcaption>${p.photoUrl ? '장소 제공 사진 · 로딩 실패 시 예시 이미지' : '예시 이미지 · 실제 장소 사진 아님'}</figcaption></figure><div><p>${esc(p.category)} · ${esc(p.address || p.region)}</p>${editable ? `<div class="form-grid"><label class="field">체류 시간 (분)<input type="number" min="5" max="${stayLimit(p)}" data-block-field="stay" data-index="${i}" value="${Number(p.stay) || 40}"></label><label class="field">예상 비용 (원)<input type="number" min="0" max="1000000" data-block-field="cost" data-index="${i}" value="${Number(p.cost) || 0}"></label></div><label class="field">메모<textarea maxlength="1000" data-block-field="note" data-index="${i}" placeholder="예약 시간, 하고 싶은 일 등">${esc(p.note || '')}</textarea></label>` : `<p>체류 ${Number(p.stay) || 0}분 · 1인 예상 ${won(p.cost)}</p>${p.note ? `<p class="block-note">${esc(p.note)}</p>` : ''}`}</div></div></article>${i < course.places.length - 1 ? `<div class="transport-block">↓ ${editable ? `<select aria-label="${i+1}번 구간 이동수단" data-block-field="transport" data-index="${i}">${['도보','자동차','대중교통'].map(m => `<option ${m === (p.transport || course.conditions.transport) ? 'selected' : ''}>${m}</option>`).join('')}</select><label>예상 <input aria-label="${i+1}번 구간 이동 시간" type="number" min="0" max="600" value="${course.places[i+1].travel || 10}" data-block-field="travelNext" data-index="${i}">분</label>` : `${esc(p.transport || course.conditions.transport)} 이동 · 약 ${Number(course.places[i+1].travel) || 0}분 · ${course.places[i+1].travelActual ? '조회 거리 ' : '추정 거리 '}${Number.isFinite(course.places[i+1].travelDistance) ? course.places[i+1].travelDistance + 'm' : '미확인'}`}${!editable ? routeLinks(p, course.places[i+1]) : ''}</div>` : ''}`).join('');
 }
 function sharedPage(course) {
-  return greeting(esc(course.title), '링크를 받은 누구나 볼 수 있는 읽기 전용 코스입니다.', 'SHARED COURSE') + '<div class="shared-notice">읽기 전용 · 공유 시점에 저장된 코스 · 편집할 수 없어요</div><p>' + esc(course.conditions.date || '날짜 미정') + ' · ' + esc(course.conditions.region) + ' · 예상 ' + won(course.totalCost) + '</p><div class="block-list">' + blocks(course) + '</div>';
+  return greeting(esc(course.title), '링크를 받은 누구나 볼 수 있는 읽기 전용 코스입니다.', 'SHARED COURSE') + '<div class="shared-notice">읽기 전용 · 공유 시점에 저장된 코스 · 편집할 수 없어요</div><p>' + esc(course.conditions.date || '날짜 미정') + ' · ' + esc(course.conditions.region) + ' · 예상 ' + won(course.totalCost) + '</p>' + groupSummary(course) + '<div class="block-list">' + blocks(course) + '</div>';
 }
 function editorPage() {
   const c = state.editor;
   const available = state.places.filter(p => !c.places.some(q => q.id === p.id));
-  return greeting('우리의 하루를 편집해요.', '⠿ 핸들을 드래그하거나 화살표로 장소 순서를 바꾸세요. 저장해야 변경이 반영됩니다.', 'COURSE EDITOR') + `<div class="detail-actions">${btn('save-edit','변경사항 저장','','primary')}${btn('cancel-edit','취소','','outline')}</div><div class="editor-heading"><label class="field">코스 제목<input id="editor-title" maxlength="200" value="${esc(c.title)}"></label><label class="field">시작 시간<input id="editor-start" type="time" value="${esc(c.conditions.start)}"></label></div><div class="block-list">${blocks(c, true)}</div><div class="block-add"><label class="field">검색 결과에서 장소 추가<select id="editor-place">${available.map(p => `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.category)}</option>`).join('')}</select></label>${btn('block-add','장소 추가','','outline', !available.length || c.places.length >= 12 ? 'disabled' : '')}</div><p class="form-note">이동시간은 직접 수정하는 예상값입니다. 순서를 바꾼 구간은 기본 10분으로 초기화됩니다. 장소는 2~12개로 구성할 수 있어요. 기존 공유 링크는 공유 시점의 코스를 유지합니다.</p>`;
+  return greeting('우리의 하루를 편집해요.', '⠿ 핸들을 드래그하거나 화살표로 장소 순서를 바꾸세요. 저장해야 변경이 반영됩니다.', 'COURSE EDITOR') + `<div class="detail-actions">${btn('save-edit','변경사항 저장','','primary')}${btn('cancel-edit','취소','','outline')}</div><div class="editor-heading"><label class="field">코스 제목<input id="editor-title" maxlength="200" value="${esc(c.title)}"></label><label class="field">시작 시간<input id="editor-start" type="time" value="${esc(c.conditions.start)}"></label></div><div class="block-list">${blocks(c, true)}</div>${timeNotice(c)}<div class="block-add"><label class="field">검색 결과에서 장소 추가<select id="editor-place">${available.map(p => `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.category)}</option>`).join('')}</select></label>${btn('block-add','장소 추가','','outline', !available.length || c.places.length >= Math.floor(c.conditions.duration / 5) ? 'disabled' : '')}</div><p class="form-note">이동시간은 직접 수정하는 예상값입니다. 순서를 바꾼 구간은 기본 10분으로 초기화됩니다. 장소 수는 전체 시간과 예산에 맞춰 늘릴 수 있어요. 식사는 최대 90분이에요. 기존 공유 링크는 공유 시점의 코스를 유지합니다.</p>`;
 }
 function moveBlock(from, to) {
   if (!state.editor || to < 0 || to >= state.editor.places.length || from === to) return;
   const [p] = state.editor.places.splice(from, 1); state.editor.places.splice(to, 0, p);
-  state.editor.places.forEach((p, i) => { p.travel = i ? 10 : 0; }); render();
+  state.editor.places.forEach((p, i) => { p.travel = i ? 10 : 0; p.travelActual = false; p.travelDistance = null; }); render();
 }
 function updateSchedule(c) {
   let minute = c.conditions.start.split(':').reduce((h, m) => Number(h) * 60 + Number(m)); const start = minute;
@@ -556,7 +580,7 @@ function updateSchedule(c) {
     minute += Number(p.stay) || 0;
   }
   c.end = `${String(Math.floor(minute / 60) % 24).padStart(2,'0')}:${String(minute % 60).padStart(2,'0')}`;
-  c.minutes = minute - start; c.totalCost = c.places.reduce((n,p) => n + Number(p.cost || 0), 0);
+  c.minutes = minute - start; c.remainingMinutes = Math.max(0, c.conditions.duration - c.minutes); c.totalCost = c.places.reduce((n,p) => n + Number(p.cost || 0), 0);
 }
 async function saveEditor() {
   if (!state.user || state.shared || !state.editor) return;
@@ -574,8 +598,12 @@ document.addEventListener('input', e => {
   if (e.target.id === 'editor-start') state.editor.conditions.start = e.target.value || '14:00';
   const field = e.target.dataset.blockField, i = Number(e.target.dataset.index);
   if (!field) return;
-  if (field === 'travelNext') state.editor.places[i+1].travel = Math.max(0, Math.min(600, Number(e.target.value)));
-  else state.editor.places[i][field] = ['stay','cost'].includes(field) ? Math.max(field === 'stay' ? 5 : 0, Math.min(field === 'stay' ? 720 : 1000000, Number(e.target.value))) : e.target.value;
+  if (field === 'travelNext') { state.editor.places[i+1].travel = Math.max(0, Math.min(600, Number(e.target.value))); state.editor.places[i+1].travelActual = false; state.editor.places[i+1].travelDistance = null; }
+  else state.editor.places[i][field] = ['stay','cost'].includes(field) ? Math.max(field === 'stay' ? 5 : 0, Math.min(field === 'stay' ? stayLimit(state.editor.places[i]) : 1000000, Number(e.target.value))) : e.target.value;
+  if (field === 'stay') state.editor.places[i].stayFixed = true;
+  if (field === 'transport' && state.editor.places[i+1]) { state.editor.places[i+1].travelActual = false; state.editor.places[i+1].travelDistance = null; }
+  updateSchedule(state.editor);
+  const notice = document.querySelector('.remaining-time'); if (notice) notice.outerHTML = timeNotice(state.editor);
 });
 let draggedBlock = null;
 document.addEventListener('dragstart', e => {

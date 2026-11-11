@@ -26,3 +26,15 @@ test('app-owned photo errors still show a fallback', () => {
  h.handlers.error({ target: photo }); assert.equal(photo.src, './place-example.svg'); assert.equal(photo.replaced, false);
  h.handlers.error({ target: photo }); assert.equal(photo.replaced, true);
 });
+
+test('travel selection shows party input and date selection hides it',()=>{
+ const h=harness(), input={disabled:true}, field={hidden:true,querySelector:()=>input};
+ const target={name:'purpose',value:'여행',form:{id:'conditions-form',querySelector:()=>field}};
+ h.handlers.change({target});assert.equal(field.hidden,false);assert.equal(input.disabled,false);
+ target.value='데이트';h.handlers.change({target});assert.equal(field.hidden,true);assert.equal(input.disabled,true);
+});
+test('travel summary displays party size and aggregate estimated cost',()=>{
+ const h=harness();
+ const html=vm.runInContext("groupSummary({conditions:{purpose:'여행',partySize:4},totalCost:19000})",h.context);
+ assert.match(html,/4명/);assert.match(html,/76,000원/);
+});

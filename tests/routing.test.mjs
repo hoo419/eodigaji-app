@@ -54,3 +54,11 @@ test('provider failure cannot masquerade as a real route or expose secrets', asy
   assert.ok(!JSON.stringify(result).includes('private-key'));
   await assert.rejects(route([{ lat: Infinity, lng: 1 }, points[1]], '도보'), /좌표/);
 });
+
+test('routes support more than four blocks and preserve each provider distance', async () => {
+  const route = createRouting({KAKAO_REST_API_KEY:'test'}, async () => ({ok:true,json:async()=>({routes:[{result_code:0,summary:{distance:1234,duration:420},sections:[{roads:[{vertexes:[127,37.5,127.01,37.51]}]}]}]})}));
+  const many = Array.from({length:8},(_,i)=>({name:'장소'+i,lat:37.5+i/1000,lng:127+i/1000}));
+  const result = await route(many,'자동차');
+  assert.equal(result.legs.length,7);
+  assert.ok(result.legs.every(l=>l.actual && l.distance===1234 && l.minutes===7));
+});

@@ -59,9 +59,9 @@ test('place search caches a larger pool so refresh can obtain new real place can
     return new Response(JSON.stringify({ documents: Array.from({ length: 15 }, (_, i) => ({ id: `${q}-${i}`, place_name: q + i, x: '127', y: '37.5' })) }));
   });
   const a = await api.searchPlaces('테스트동');
-  const b = await api.searchPlaces('테스트동', { excludePlaceIds: a.map(p => p.id) });
-  assert.equal(a.length, 12); assert.equal(b.length, 12); assert.equal(requests, 4);
-  assert.ok(b.every(p => !a.some(q => q.id === p.id)));
+  const b = await api.searchPlaces('테스트동', { excludePlaceIds: a.slice(0, 12).map(p => p.id) });
+  assert.equal(a.length, 60); assert.equal(b.length, 48); assert.equal(requests, 4);
+  assert.ok(b.every(p => !a.slice(0, 12).some(q => q.id === p.id)));
 });
 
 test('chat and refresh APIs enforce constraints even with an imperfect AI and reject exhausted alternatives', async t => {

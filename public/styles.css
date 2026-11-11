@@ -101,3 +101,41 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .save-float.saved{background:#a91d35;color:#fff;border:2px solid #fff;opacity:1;box-shadow:0 2px 8px #0003}.save-float.saved svg{fill:currentColor}.saved-state{position:absolute;right:12px;top:58px;background:#fff;color:#a91d35;border-radius:6px;padding:4px 8px;font-size:11px;font-weight:700;box-shadow:0 1px 5px #0002}.constraint-note{padding:10px 14px;background:#fff4c4;border-radius:8px;font-size:12px;margin:14px 0}
 .conversation-context{padding:12px 18px;background:#fffae8;border-bottom:1px solid var(--line);font-size:12px;max-height:200px;overflow:auto}.conversation-context ol{padding-left:20px;margin:8px 0;line-height:1.8}.conversation-context .tag{margin-left:8px}.conversation-context .btn{min-height:28px;margin-top:8px;font-size:11px}.conversation-context small{display:block;color:#706950}
 .explore-grid.chat-layout{grid-template-columns:minmax(380px,1.1fr) minmax(0,1fr)}.chat-layout .chat-panel{height:780px;min-height:780px}.conversation-context{flex-shrink:0;max-height:230px}.chat-heading,.suggestions,.chat-compose,.chat-note{flex-shrink:0}.chat-panel .messages{min-height:150px}.conversation-context details{margin:6px 0}.conversation-context ul{padding-left:18px;margin:6px 0}@media(max-width:740px){.chat-layout .chat-panel{height:800px;min-height:800px}}
+
+/* Remaining time stays visible within each saved course and the block editor. */
+.remaining-time { position: sticky; bottom: 16px; margin: 16px auto 0 0; padding: 12px 16px; border: 1px solid #d3dfcc; border-radius: 12px; background: #f1f6ec; color: #365235; width: fit-content; max-width: 100%; z-index: 2; font-size: 13px; }
+
+.saved-time-notices { position: fixed; bottom: 20px; left: 280px; max-width: min(420px, calc(100vw - 300px)); max-height: 30vh; overflow: auto; z-index: 8; }
+.saved-time-notices .remaining-time { position: static; margin-top: 6px; }
+@media (max-width: 800px) { .saved-time-notices { left: 16px; bottom: 85px; max-width: calc(100vw - 32px); } }
+
+/* Keep colocated stops and tablet controls individually visible. */
+.route-marker-group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center; max-width: 190px; padding: 4px; }
+.route-marker-group .route-marker { position: relative; flex: 0 0 36px; margin: 0; transform: none; }
+.conversation-actions { display: flex; align-items: stretch; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.conversation-context .conversation-actions .btn { margin: 0; min-height: 40px; flex: 0 1 auto; max-width: 100%; white-space: normal; line-height: 1.5; }
+.course-save-control { position: absolute; top: 12px; right: 12px; z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.course-save-control .save-float { position: static; display: inline-flex; justify-content: center; align-items: center; width: 36px; height: 36px; padding: 0; line-height: 1; flex: none; }
+.course-save-control .save-float .icon { width: 20px; height: 20px; display: block; margin: 0; }
+.course-save-control .saved-state { position: static; white-space: nowrap; line-height: 1.4; }
+.course-image .photo-badge { max-width: calc(100% - 120px); }
+
+#trip-party-field[hidden] { display: none; }
+.group-summary { display: inline-block; font-size: 12px; color: #4b593c; padding: 6px 8px; background: #f1f5eb; border-radius: 6px; }
+
+/* Override the mobile bottom-sheet margin for login/signup in Safari top layer. */
+dialog.auth-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(480px, calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+  max-width: calc(100% - 32px);
+  max-height: calc(100vh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  max-height: calc(100dvh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  border-radius: 20px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.auth-dialog .field input { width: 100%; font-size: 16px; }
+.auth-dialog .dialog-head h2 { overflow-wrap: anywhere; }
+.auth-dialog .dialog-actions { padding-bottom: 16px; }

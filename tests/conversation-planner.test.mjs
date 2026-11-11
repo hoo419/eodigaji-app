@@ -38,7 +38,7 @@ test('budget conflict preserves the original and remembers the requested budget 
 });
 test('time and category conflicts ask instead of returning an invalid route',()=>{
  const c=makeCourse();
- assert.match(apply(decide([step('stay','p0',{minutes:300})]),c).message,/길어요/);
+ assert.match(apply(decide([step('stay','p0',{minutes:300})]),c).message,/길어요|체류 시간/);
  const result=apply(decide([]),c,{},applyCategoryRules('카페만',c.conditions));assert.equal(result.course,null);assert.match(result.message,/충돌/);
 });
 test('unkeep needs an explicit user request and soft preferences remain separate from verified facts',()=>{
