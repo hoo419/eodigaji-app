@@ -18,6 +18,23 @@ test('real HTTP API validates requests and serves plans without exposing private
   const noMatch = await fetch(url + '/api/plan', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ region: '성수', budget: 0, duration: 60 }) });
   assert.equal(noMatch.status, 400);
   assert.equal((await noMatch.json()).code, 'NO_MATCHING_COURSE');
+  const post = (path, body) => fetch(url + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify(body) });
+  const invalid = await post('/api/plan', { date: '2026-02-30' });
+  assert.equal(invalid.status, 400);
+  assert.match((await invalid.json()).error, /날짜/);
+  assert.equal((await post('/api/plan', { date: '2028-02-29' })).status, 200);
+  for (const [conditions, label] of [[{ budget: null }, '예산'], [{ duration: 180.5 }, '시간']]) {
+    const response = await post('/api/plan', conditions);
+    assert.equal(response.status, 400);
+    assert.ok((await response.json()).error.includes(label));
+  }
+  for (const [message, label] of [['화성에서 우주선으로 데이트', '지역'], ['연남에서 자전거로 데이트', '이동수단']]) {
+    const response = await post('/api/chat', { message });
+    assert.equal(response.status, 200);
+    const reply = await response.json();
+    assert.equal(reply.course, null);
+    assert.ok(reply.message.includes(label));
+  }
   const bad = await fetch(url + '/api/plan', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: '{broken' });
   assert.equal(bad.status, 400);
   assert.equal((await fetch(url + '/package.json')).status, 404);

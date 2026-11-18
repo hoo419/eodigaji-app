@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { loadEnvFile } from 'node:process';
-import { places, planCourse, recommendCourses, parseMessage, normalize } from './lib/planner.mjs';
+import { places, planCourse, recommendCourses, parseMessage, normalize, unsupportedTransport } from './lib/planner.mjs';
 import { createConnections } from './lib/connections.mjs';
 import { createSessions } from './lib/sessions.mjs';
 import { createRouting } from './lib/routing.mjs';
@@ -42,7 +42,7 @@ export function createApp({ env = process.env, connections = createConnections(e
   const rates = new Map(); let day = '', aiCount = 0;
   const status = connections.publicConfig();
   async function plan(input) {
-    const { excludePlaceIds = [], startLocation, ...conditions } = input;
+    const { excludePlaceIds = [], startLocation, ...requestedConditions } = input;
     if (!Array.isArray(excludePlaceIds) || excludePlaceIds.length > 120 || excludePlaceIds.some(id => typeof id !== 'string' || id.length > 100)) throw new Error('이전 장소 정보를 확인해 주세요.');
     let origin, radius;
     if (startLocation !== undefined) {
@@ -50,9 +50,10 @@ export function createApp({ env = process.env, connections = createConnections(e
       if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || ![3000, 5000].includes(requestedRadius)) throw new Error('현재 위치와 검색 범위를 확인해 주세요.');
       if (!status.places) throw new Error('현재 위치 탐색은 실제 장소 검색을 연결한 뒤 이용할 수 있어요.');
       origin = { lat, lng }; radius = requestedRadius;
-      for (const key of ['destinationName', 'destinationAddress', 'destinationUrl', 'destinationLat', 'destinationLng']) delete conditions[key];
-      conditions.region = '현재 위치 주변';
+      for (const key of ['destinationName', 'destinationAddress', 'destinationUrl', 'destinationLat', 'destinationLng']) delete requestedConditions[key];
+      requestedConditions.region = '현재 위치 주변';
     }
+    const conditions = normalize(requestedConditions);
     const center = origin || (Number.isFinite(conditions.destinationLat) && Number.isFinite(conditions.destinationLng) ? { lat: conditions.destinationLat, lng: conditions.destinationLng } : undefined);
     let catalogue = status.places ? await connections.searchPlaces(conditions.region || '성수', { excludePlaceIds, ...(center ? { center } : {}), ...(origin ? { radius, privateCenter: true } : {}) }) : places;
     if (origin) {
@@ -174,6 +175,7 @@ export function createApp({ env = process.env, connections = createConnections(e
         const { message, conditions = {}, history = [], excludePlaceIds = [], currentCourse = null, memory = {} } = await readJson(req);
         if (typeof message !== 'string' || !message.trim() || message.length > 1500) throw new Error('메시지는 1~1500자로 입력해 주세요.');
         if (!conditions || Array.isArray(conditions) || typeof conditions !== 'object') throw new Error('조건을 확인해 주세요.');
+        if (status.ai && unsupportedTransport(message)) return json(res, 200, { message: '코스 이동수단은 도보, 대중교통, 자동차 중에서 골라 주세요.', course: null });
         const existing = currentCourse ? snapshot(currentCourse) : null;
         const retainedMemory = planningMemory(memory, existing);
         if (!Array.isArray(excludePlaceIds) || excludePlaceIds.length > 120 || excludePlaceIds.some(id => typeof id !== 'string' || id.length > 100)) throw new Error('이전 장소 정보를 확인해 주세요.');
@@ -226,6 +228,7 @@ export function createApp({ env = process.env, connections = createConnections(e
         }
         // AI 키가 없을 때는 정규식 기반 체험 모드이며 실제 AI 응답이 아닙니다.
         const parsed = parseMessage(message, retainedMemory.pendingConditions || conditions);
+        if (parsed.clarification) return json(res, 200, { message: parsed.clarification, course: null });
         if (existing) {
           const decision = localCourseDecision(message, existing, parsed.conditions, catalogue, retainedMemory);
           if (decision.operation === 'create') {

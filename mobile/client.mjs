@@ -30,6 +30,7 @@ export function createMobileClient({ apiBase = '', request } = {}) {
     if (path === '/api/chat') {
       if (typeof body?.message !== 'string' || !body.message.trim() || body.message.length > 1500) throw new Error('메시지는 1~1500자로 입력해 주세요.');
       const parsed = parseMessage(body.message, body.conditions || {});
+      if (parsed.clarification) return { message: parsed.clarification, course: null };
       if (!parsed.understood.length) return { message: '오프라인 체험 중이에요. “성수에서 실내로, 1인 3만원”처럼 지역·예산·분위기를 알려 주세요.', course: null };
       const course = planCourse(parsed.conditions);
       return { message: `${parsed.understood.join(', ')} 조건으로 ${course.places.length}곳의 샘플 코스를 준비했어요. 서버 없이 앱에서 만든 체험 코스입니다.`, course };
