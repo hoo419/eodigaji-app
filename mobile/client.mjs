@@ -19,7 +19,7 @@ export function createMobileClient({ apiBase = '', request } = {}) {
       catch { throw new Error('서버에 연결하지 못했어요. 인터넷 연결과 서버 주소를 확인해 주세요.'); }
       let data = response.data;
       if (typeof data === 'string') { try { data = JSON.parse(data); } catch { throw new Error('서버 응답을 읽지 못했어요.'); } }
-      if (response.status < 200 || response.status >= 300) throw new Error(data?.error || '서버 요청에 실패했어요.');
+      if (response.status < 200 || response.status >= 300) throw Object.assign(new Error(data?.error || '서버 요청에 실패했어요.'), { code: data?.code });
       return data;
     }
     if (path === '/api/config') return { ai: false, aiProvider: 'gemini', places: false, map: false, mapKey: '', auth: false, offline: true };

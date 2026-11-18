@@ -139,3 +139,20 @@ dialog.auth-dialog {
 .auth-dialog .field input { width: 100%; font-size: 16px; }
 .auth-dialog .dialog-head h2 { overflow-wrap: anywhere; }
 .auth-dialog .dialog-actions { padding-bottom: 16px; }
+
+.plan-alternatives { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.availability-panel { max-width: 980px; margin: 20px 0; padding: clamp(14px, 4vw, 24px); border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+.availability-panel h2 { margin-bottom: 12px; font-size: 18px; }
+.availability-panel ul { display: grid; gap: 8px; padding-left: 20px; }
+.availability-panel li { overflow-wrap: anywhere; }
+.availability-panel li p { white-space: pre-wrap; }
+.availability-panel form { margin-top: 16px; }
+.availability-panel textarea { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; resize: vertical; }
+.availability-panel form > button { justify-self: start; }
+.availability-panel [role="status"] { margin-top: 8px; }
+.filter-end { gap: 8px; flex-wrap: wrap; }
+@media (max-width: 740px) {
+  .filters { flex-wrap: wrap; row-gap: 10px; }
+  .filter-end { flex-basis: 100%; justify-content: flex-end; }
+  .filter-end .nearby-button { font-size: 11px; padding-inline: 10px; }
+}

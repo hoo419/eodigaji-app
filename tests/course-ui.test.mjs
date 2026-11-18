@@ -6,11 +6,29 @@ import { places, recommendCourses } from '../lib/planner.mjs';
 const source = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8').replace(/^import .*;\r?\n/gm, '').replace(/init\(\);\s*$/, '');
 function harness(windowOptions = {}, navigator = {}) {
   const handlers = {};
+  const submitHandlers = [];
   const node = { addEventListener() {}, remove() {} };
-  const context = vm.createContext({ document: { querySelector: () => node, addEventListener() {} }, window: { addEventListener: (key, fn) => { handlers[key] = fn; }, matchMedia: () => ({ matches: false, addEventListener() {} }), ...windowOptions }, navigator, localStorage: { getItem: () => null }, icon: () => '' });
+  const context = vm.createContext({ document: { querySelector: () => node, addEventListener(key, fn) { if (key === 'submit') submitHandlers.push(fn); } }, window: { addEventListener: (key, fn) => { handlers[key] = fn; }, matchMedia: () => ({ matches: false, addEventListener() {} }), ...windowOptions }, navigator, localStorage: { getItem: () => null }, icon: () => '' });
   vm.runInContext(source, context);
-  return { context, handlers, run: code => vm.runInContext(code, context) };
+  return { context, handlers, submitHandlers, run: code => vm.runInContext(code, context) };
 }
+test('changing exploration conditions searches previously recommended places again', async () => {
+  const h = harness();
+  const courses = recommendCourses({ region: '성수', budget: 50000 });
+  h.context.initial = { ...courses[0], recommendations: courses };
+  h.context.FormData = class { *[Symbol.iterator]() { yield ['budget', '40000']; yield ['environment', '실내']; } };
+  h.context.search = (path, { excludePlaceIds = [], ...conditions }) => {
+    assert.equal(path, '/api/plan');
+    const results = recommendCourses(conditions, places, { excludePlaceIds });
+    return { ...results[0], recommendations: results };
+  };
+  h.run(`acceptCourse(initial); api = search; render = toast = closeDialog = () => {};
+    dialog.querySelector = () => ({})`);
+  await h.submitHandlers[0]({ preventDefault() {}, target: { id: 'conditions-form' } });
+  assert.equal(h.run('state.course.conditions.budget'), 40000);
+  assert.equal(h.run('state.course.conditions.environment'), '실내');
+  assert.ok(h.run('state.course.places.some(p => initial.recommendations.some(c => c.places.some(q => q.id === p.id)))'));
+});
 test('installed native Android and iOS/PWA modes suppress install controls', () => {
   assert.equal(harness().run('installed()'), false);
   assert.equal(harness({ EodigajiNative: {} }).run('installed()'), true);

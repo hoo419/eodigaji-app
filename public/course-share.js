@@ -1,5 +1,5 @@
 // 공개 코스 정보만 URL에 담습니다. 계정·프로필·인증 정보는 포함하지 않습니다.
-const courseKeys = ['id', 'title', 'conditions', 'places', 'totalCost', 'minutes', 'end', 'demo', 'estimated', 'concept', 'environmentLabel', 'label', 'revision', 'timingMode', 'remainingMinutes'];
+const courseKeys = ['id', 'title', 'conditions', 'places', 'totalCost', 'minutes', 'end', 'demo', 'estimated', 'concept', 'environmentLabel', 'label', 'revision', 'timingMode', 'remainingMinutes', 'departureMinutes', 'departurePlaceId', 'departureTransport'];
 const conditionKeys = ['region', 'purpose', 'partySize', 'budget', 'duration', 'start', 'date', 'environment', 'mood', 'transport', 'categories', 'excludedCategories', 'includeMeals', 'destinationName', 'destinationAddress', 'destinationUrl', 'destinationLat', 'destinationLng'];
 const placeKeys = ['id', 'name', 'region', 'category', 'cost', 'stay', 'stayWeight', 'stayFixed', 'environment', 'mood', 'x', 'y', 'lat', 'lng', 'photo', 'description', 'address', 'hours', 'demo', 'time', 'travel', 'travelDistance', 'travelBasis', 'travelActual', 'url', 'sourceUrl', 'photoUrl', 'note', 'transport'];
 const pick = (value, keys) => Object.fromEntries(keys.filter(k => value[k] !== undefined).map(k => [k, value[k]]));
@@ -44,4 +44,49 @@ export function readSharedCourse(hash) {
     if (data.version !== 1) throw new Error();
     return snapshot(data.course);
   } catch { throw new Error('공유 링크가 손상되었거나 지원하지 않는 코스입니다.'); }
+}
+
+const clockPattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+function validDate(date) {
+  if (typeof date !== 'string' || !/^[1-9]\d{3}-\d{2}-\d{2}$/.test(date)) return false;
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return Number.isFinite(+parsed) && parsed.toISOString().slice(0, 10) === date;
+}
+
+export function normalizeAvailability({ date, start, end, name = '', memo = '' }) {
+  if (!validDate(date)) throw new Error('가능한 날짜를 확인해 주세요.');
+  if (typeof start !== 'string' || typeof end !== 'string' || !clockPattern.test(start) || !clockPattern.test(end) || start >= end) {
+    throw new Error('같은 날의 시작 시간과 그 이후의 종료 시간을 선택해 주세요.');
+  }
+  if (typeof name !== 'string' || typeof memo !== 'string' || name.length > 30 || memo.length > 300) {
+    throw new Error('별명은 30자, 메모는 300자 이내로 입력해 주세요.');
+  }
+  return { date, start, end, name: name.trim(), memo: memo.trim() };
+}
+
+export function courseCalendar(course, now = new Date(), url = '') {
+  const { date, start, region } = course.conditions;
+  const minutes = Math.round(course.minutes);
+  if (!validDate(date) || !clockPattern.test(start) || !Number.isFinite(minutes) || minutes <= 0) {
+    throw new Error('캘린더에 추가하려면 코스 날짜와 시간을 확인해 주세요.');
+  }
+  const begins = new Date(`${date}T${start}:00+09:00`);
+  const ends = new Date(+begins + minutes * 60000);
+  const stamp = value => value.toISOString().replace(/[-:]|\.\d{3}/g, '');
+  const escape = value => String(value).replaceAll('\\', '\\\\').replace(/\r\n|\r|\n/g, '\\n').replace(/[;,]/g, '\\$&');
+  const description = course.places.map(place => `${place.time} ${place.name}`).join('\n');
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Eodigaji//Course Calendar//KO', 'BEGIN:VEVENT',
+    `UID:${escape(course.id)}@eodigaji`, `DTSTAMP:${stamp(now)}`, `DTSTART:${stamp(begins)}`, `DTEND:${stamp(ends)}`,
+    `SUMMARY:${escape(course.title)}`, `LOCATION:${escape(region)}`, `DESCRIPTION:${escape(description)}`,
+    ...(url ? [`URL:${url}`] : []), 'END:VEVENT', 'END:VCALENDAR'];
+  const encoder = new TextEncoder();
+  return lines.map(line => {
+    let folded = '', bytes = 0;
+    for (const character of line) {
+      const size = encoder.encode(character).length;
+      if (bytes + size > 75) { folded += '\r\n '; bytes = 1; }
+      folded += character; bytes += size;
+    }
+    return folded;
+  }).join('\r\n') + '\r\n';
 }

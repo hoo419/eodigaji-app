@@ -13,14 +13,12 @@ window.EodigajiNative = {
   offline: !config.apiBase,
   request: createMobileClient({ apiBase: config.apiBase, request: options => CapacitorHttp.request(options) }),
   async requestLocation() {
-    if (!native) { if (!navigator.geolocation) throw new Error('위치 기능을 사용할 수 없어요.'); return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(() => resolve(true), reject, { timeout: 8000 })); }
+    if (!native) { if (!navigator.geolocation) throw new Error('위치 기능을 사용할 수 없어요.'); return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(position => resolve(position.coords), reject, { timeout: 8000 })); }
     const permissionName = Capacitor.getPlatform() === 'ios' ? 'location' : 'coarseLocation';
     let permission = await Geolocation.checkPermissions();
     if (!['granted', 'limited'].includes(permission[permissionName])) permission = await Geolocation.requestPermissions({ permissions: [permissionName] });
     if (!['granted', 'limited'].includes(permission[permissionName])) throw new Error('위치 권한을 허용하지 않았어요. 지역을 직접 선택할 수 있어요.');
-    // 현재는 위치 사용 가능 여부만 확인하고 좌표를 보관하거나 서버로 전송하지 않습니다.
-    await Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 8000 });
-    return true;
+    return (await Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 8000 })).coords;
   },
   async share(text) {
     if (!native) return false;

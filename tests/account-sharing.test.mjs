@@ -23,6 +23,14 @@ test('account data survives logout, new session and server restart; shares are i
   const shared = await post('/api/shares', { courseId: c.id }, a).then(r => r.json()); assert.ok(shared.id);
   const anonymous = await fetch(base + '/api/shares/' + shared.id).then(r => r.json());
   assert.equal(anonymous.course.places[0].note, c.places[0].note); assert.equal('user_id' in anonymous.course, false);
+  const availability = `/api/shares/${shared.id}/availability`;
+  const note = { date: '2026-11-23', start: '17:00', end: '20:00', name: '일행', memo: '저녁에 가능해요' };
+  assert.equal((await post(availability, { ...note, end: '16:00' })).status, 400);
+  assert.equal((await post(availability, { ...note, date: '2026-02-30' })).status, 400);
+  assert.equal((await post(availability, note)).status, 201);
+  assert.equal((await post(availability, note)).status, 201);
+  const reused = await post('/api/shares', { courseId: c.id }, a).then(r => r.json());
+  assert.equal(reused.id, shared.id);
   c.title = '수정한 내 코스'; await post('/api/saved', { course: c }, a);
   assert.notEqual((await fetch(base + '/api/shares/' + shared.id).then(r => r.json())).course.title, c.title);
   assert.equal((await post('/api/shares/' + shared.id, { course: c }, a)).status, 405);
@@ -34,4 +42,8 @@ test('account data survives logout, new session and server restart; shares are i
   const restored = await getAccount(a);
   assert.equal(restored.profile.name, '사용자 A'); assert.equal(restored.saved[0].title, c.title); assert.equal(restored.workspace.messages[0].text, '내 대화');
   assert.equal((await fetch(base + '/api/shares/' + shared.id)).status, 200);
+  assert.deepEqual(await fetch(base + availability).then(r => r.json()), { notes: [note] });
+  const updated = await post('/api/shares', { courseId: c.id }, a).then(r => r.json());
+  assert.notEqual(updated.id, shared.id);
+  assert.deepEqual(await fetch(base + `/api/shares/${updated.id}/availability`).then(r => r.json()), { notes: [] });
 });

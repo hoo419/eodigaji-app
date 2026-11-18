@@ -17,5 +17,12 @@ export function memoryConnections() {
       return [body];
     },
     readShare: async id => structuredClone((tables.get('shared_courses') || []).find(r => r.id === id)?.data || null),
+    shareAvailability: async (id, note) => {
+      const share = (tables.get('shared_courses') || []).find(row => row.id === id);
+      if (!share) return null;
+      share.availability ??= [];
+      if (note && !share.availability.some(entry => JSON.stringify(entry) === JSON.stringify(note))) share.availability.push(note);
+      return structuredClone(share.availability);
+    },
   };
 }

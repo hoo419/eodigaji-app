@@ -51,13 +51,13 @@ try {
   await page.locator('.course-detail-grid').waitFor();
   assert.ok(await page.locator('.block-list').innerText().then(s => s.includes('자동차 이동 · 약 25분')));
   await page.getByRole('button', { name: 'URL 복사', exact: true }).click();
-  await page.getByText('읽기 전용 공유 URL을 복사했어요.').waitFor();
+  await page.getByText('공유 링크를 복사했어요.').waitFor();
   const shareUrl = await page.evaluate(() => navigator.clipboard.readText());
   const shareId = new URL(shareUrl).searchParams.get('share'); assert.ok(shareId);
   const anonymous = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await anonymous.route(/https:\/\/(?!127\.0\.0\.1)/, route => route.abort());
   const shared = await anonymous.newPage(); await shared.goto(base + '/?share=' + shareId);
-  await shared.getByText('읽기 전용 · 공유 시점에 저장된 코스 · 편집할 수 없어요').waitFor();
+  await shared.getByText('공유 시점에 저장된 코스', { exact: true }).waitFor();
   assert.equal(await shared.locator('[data-action=edit-course],[data-action=save-edit],[data-action=share]').count(), 0);
   assert.equal(await shared.locator('.course-block').count(), course.places.length);
   assert.equal(await shared.locator('script').count(), 2);

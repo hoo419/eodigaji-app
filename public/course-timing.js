@@ -30,3 +30,7 @@ export function allocateStayTimes(list, duration, travel) {
   flexible.forEach((p, i) => { p.stayWeight = weights[i]; p.stay = rounded[i]; });
   return result;
 }
+export function departureTimeFor(course, places = course.places) {
+  return course.departurePlaceId && course.departurePlaceId === places[0]?.id && Number.isInteger(course.departureMinutes)
+    ? Math.max(0, Math.min(720, course.departureMinutes)) : 0;
+}

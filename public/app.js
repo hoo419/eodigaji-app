@@ -1,7 +1,7 @@
-import { allocateStayTimes, stayLimit } from './course-timing.js';
+import { allocateStayTimes, departureTimeFor, stayLimit } from './course-timing.js';
 import { icon } from './icons.js';
 import { mountLiveMap, zoomLiveMap } from './live-map.js';
-import { readSharedCourse } from './course-share.js';
+import { readSharedCourse, courseCalendar } from './course-share.js';
 
 const $ = s => document.querySelector(s);
 // 사용자 입력·외부 문자열을 HTML 템플릿에 넣을 때 태그로 실행되지 않도록 이스케이프합니다.
@@ -45,7 +45,7 @@ async function api(path, body) {
       clearPrivateState();
       closeDialog(); render();
     }
-    if (!res.ok) throw new Error(data.error || '요청을 처리하지 못했어요.'); return data;
+    if (!res.ok) throw Object.assign(new Error(data.error || '요청을 처리하지 못했어요.'), { code: data.code }); return data;
   } catch (e) { if (e.name === 'AbortError' || e instanceof TypeError) throw new Error('서버에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.'); throw e; }
   finally { clearTimeout(timeout); }
 }
@@ -109,7 +109,7 @@ function greeting(title, sub, eyebrow = 'MAKE ROOM FOR A LITTLE ADVENTURE') { re
 function explore() {
   const c = state.conditions;
   return `${greeting('오늘, 어디로 떠나볼까요?', '취향이 닮은 장소부터 기분 좋은 동선까지. 우리의 하루를 찾아보세요.')}
-    <div class="filters" aria-label="현재 코스 조건">${[['pin', '어디로 갈까요?', `${c.region} · ${c.purpose}`], ['calendar', '언제 만날까요?', `${(c.date || dateISO).slice(5).replace('-', '.')} · ${c.start}`], ['wallet', '1인 예산', won(c.budget)], ['sun', '오늘의 취향', `${c.mood} · ${c.environment === '전체' ? '실내외' : c.environment}`]].map(([i, label, value]) => `<button class="filter-cell" data-action="filters">${icon(i)}<span><small>${label}</small><strong>${esc(value)}</strong></span>${icon('down', 'down')}</button>`).join('')}<div class="filter-end">${btn('filters', '조건 변경', 'filter', 'primary')}</div></div>
+    <div class="filters" aria-label="현재 코스 조건">${[['pin', '어디로 갈까요?', `${c.region} · ${c.purpose}`], ['calendar', '언제 만날까요?', `${(c.date || dateISO).slice(5).replace('-', '.')} · ${c.start}`], ['wallet', '1인 예산', won(c.budget)], ['sun', '오늘의 취향', `${c.mood} · ${c.environment === '전체' ? '실내외' : c.environment}`]].map(([i, label, value]) => `<button class="filter-cell" data-action="filters">${icon(i)}<span><small>${label}</small><strong>${esc(value)}</strong></span>${icon('down', 'down')}</button>`).join('')}<div class="filter-end">${btn('filters', '조건 변경', 'filter', 'primary', 'aria-label="조건 변경"')}${btn('nearby', '현재 위치에서 출발', 'target', 'outline nearby-button', state.busy ? 'disabled' : '')}</div></div>
     ${(c.categories?.length || c.excludedCategories?.length || (c.mood === '로맨틱한' && !c.includeMeals)) ? `<p class="constraint-note">${c.categories?.length ? esc(c.categories.join('·')) + '만 추천' : c.mood === '로맨틱한' && !c.includeMeals ? '로맨틱 데이트 · 카페만 (식사 요청 시 포함)' : ''}${c.excludedCategories?.length ? ' · ' + esc(c.excludedCategories.join('·')) + ' 제외' : ''}</p>` : ''}<div class="explore-toolbar"><div class="segment" role="group" aria-label="탐색 방식"><button data-action="view" data-view="map" class="${state.view === 'map' ? 'active' : ''}" aria-pressed="${state.view === 'map'}">${icon('map')}지도 탐색</button><button data-action="view" data-view="chat" class="${state.view === 'chat' ? 'active' : ''}" aria-pressed="${state.view === 'chat'}">${icon('spark')}AI와 계획하기</button></div><span class="toolbar-note">어디로 갈지 고민되는 순간, 어디가지</span></div>
     <div class="explore-grid ${state.view === 'chat' ? 'chat-layout' : ''}">${state.view === 'chat' ? chatPanel() : discovery()}${mapPanel()}</div><p class="sample-foot">샘플 체험 · 장소·사진·영업시간·비용·이동 경로는 시연용 예시입니다. 실제 AI 및 지도 서비스는 아직 연결되지 않았습니다.</p>`;
 }
@@ -119,7 +119,7 @@ function courseCard(course, saved = false) {
   return `<article class="course-card"><div class="course-image">${photo(course.places[0])}<span class="photo-badge">${icon('spark')} ${esc(c.mood)} ${esc(c.purpose)}</span><div class="course-save-control"><button class="save-float ${isSaved(course) ? 'saved' : ''}" data-action="save" data-id="${esc(course.id)}" aria-label="${isSaved(course) ? '저장됨' : '코스 저장'}" aria-pressed="${isSaved(course)}">${icon('heart')}</button>${isSaved(course) ? '<span class="saved-state">♥ 저장됨</span>' : ''}</div><span class="photo-caption">분위기 참고 이미지</span></div>
     <div class="course-body"><div class="row"><span class="tag blue">${esc(c.region)}</span>${c.purpose === '여행' ? `<span class="tag">${Number(c.partySize) || 2}명</span>` : ''}<span class="tag">${esc(c.environment === '전체' ? '실내 + 실외' : c.environment)}</span><span class="tag">${esc(c.transport)}</span></div><h3>${esc(course.title)}</h3><p>${c.purpose === '데이트' ? '서로에게 조금 더 집중할 수 있도록,' : '동네의 새로운 모습을 만날 수 있도록,'}<br>취향에 맞는 ${course.places.length}곳을 하나의 하루로 이었어요.</p>
     <div class="mini-route">${course.places.map((p, i) => `${i ? icon('chevron') : ''}<b>${esc(p.category)}</b>`).join('')}</div><div class="course-stats"><span class="row">${icon('clock')}${length(course.minutes)}</span><span class="row">${icon('wallet')}1인 ${course.estimated ? '예상 ' : ''}${won(course.totalCost)}</span><span class="row">${icon('pin')}${course.places.length}곳</span>${groupSummary(course)}</div>
-    ${saved ? `<div class="saved-actions">${btn('course', '코스 다시 보기', 'arrow', 'primary', `data-id="${esc(course.id)}"`)}${btn('edit-course', '블록 수정', '', 'outline', `data-id="${esc(course.id)}"`)}${actionIcon('remove-saved', 'trash', '저장한 코스 삭제', `data-id="${esc(course.id)}"`)}</div>` : btn('course', '우리의 코스 자세히 보기', 'arrow', 'primary full', `data-id="${esc(course.id)}"`)}</div></article>`;
+    ${saved ? `<div class="saved-actions">${btn('course', '코스 다시 보기', 'arrow', 'primary', `data-id="${esc(course.id)}"`)}${btn('edit-course', '블록 수정', '', 'outline', `data-id="${esc(course.id)}"`)}${btn('calendar', '캘린더에 추가', 'calendar', 'outline', `data-id="${esc(course.id)}"`)}${actionIcon('remove-saved', 'trash', '저장한 코스 삭제', `data-id="${esc(course.id)}"`)}</div>` : btn('course', '우리의 코스 자세히 보기', 'arrow', 'primary full', `data-id="${esc(course.id)}"`)}</div></article>`;
 }
 function discovery() {
   const courses = state.recommendations.length ? state.recommendations : state.course ? [state.course] : [];
@@ -148,7 +148,7 @@ async function loadCourseRoute(mode) {
       course.places.forEach(p => { p.transport = mode; });
       result.legs.forEach((leg,i) => { if (leg.actual) Object.assign(course.places[i+1], {travel:leg.minutes,travelDistance:leg.distance,travelActual:true,travelBasis:'카카오 길찾기 조회 결과'}); });
       if (course.timingMode === 'proportional') {
-        const travel = course.places.slice(1).reduce((n,p) => n + p.travel,0);
+        const travel = course.places.slice(1).reduce((n,p) => n + p.travel, departureTimeFor(course));
         try { course.places = allocateStayTimes(course.places, course.conditions.duration, travel); }
         catch (e) { toast(e.message); }
       }
@@ -214,6 +214,88 @@ function selectField(name, label, values, current) { return `<label class="field
 function filtersDialog() {
   const c = state.conditions;
   openDialog('어떤 하루를 만들까요?', `<p>이번 데이트에 맞는 조건을 골라 주세요.<br>부담 없는 예산과 편안한 동선부터 시작해요.</p><form id="conditions-form"><div class="form-grid"><label class="field">희망 지역<input name="region" type="text" maxlength="60" value="${esc(c.region)}" placeholder="예: 부산 해운대, 수원 행궁동, 제주 애월" required></label>${selectField('purpose', '오늘의 목적', ['데이트', '여행'], c.purpose)}<label class="field" id="trip-party-field" ${c.purpose !== '여행' ? 'hidden' : ''}>여행 인원 (본인 포함)<input name="partySize" type="number" min="1" max="100" step="1" value="${Number(c.partySize) || 2}" ${c.purpose !== '여행' ? 'disabled' : ''} required><small>예산은 1인 기준이며 전체 예상 비용을 함께 표시해요.</small></label><label class="field">날짜<input name="date" type="date" value="${esc(c.date)}" required></label><label class="field">시작 시간<input name="start" type="time" value="${esc(c.start)}" required></label>${selectField('duration', '함께할 시간', [[120, '2시간'], [180, '3시간'], [240, '4시간'], [360, '6시간']], c.duration)}<label class="field">1인당 예산 (원)<input name="budget" type="number" min="0" max="1000000" step="500" value="${c.budget}" required></label>${selectField('mood', '선호 분위기', ['여유로운', '감성적인', '로맨틱한', '활동적인'], c.mood)}${selectField('transport', '이동수단', ['도보', '대중교통', '자동차'], c.transport)}${selectField('environment', '실내 · 실외', [['전체', '상관없어요'], '실내', '실외'], c.environment)}</div><div class="form-note">시·군·구나 동네 이름을 입력해 주세요. 실제 장소 검색은 국내 지역을 지원하며, 샘플 모드에서는 성수·연남·해방촌만 이용할 수 있어요. 영업 여부와 교통 상황은 반영되지 않습니다.</div><p id="form-error" class="form-error" role="alert"></p></form>`, `<button class="btn primary" type="submit" form="conditions-form">${icon('spark')}이 조건으로 코스 찾기</button>`);
+}
+function showPlanFailure(error, form, includePrevious = false) {
+  const message = form?.querySelector('#form-error');
+  if (!message) return;
+  message.textContent = error.message;
+  form.querySelector('.plan-alternatives')?.remove();
+  if (error.code !== 'NO_MATCHING_COURSE' && error.code !== 'NO_PLACES_IN_REGION') return;
+
+  const fields = form.elements;
+  const nearby = Number(form.dataset.nearbyRadius);
+  if (!nearby && error.code === 'NO_PLACES_IN_REGION') {
+    fields.region.focus();
+    return;
+  }
+  const options = [];
+  if (nearby === 3000) options.push(['nearby', 5000, '검색 범위 5km로 넓히기']);
+  if (includePrevious) options.push(['', '', '이전 장소도 포함해서 찾기']);
+  if (error.code === 'NO_MATCHING_COURSE') {
+    if (fields.environment.value !== '전체') options.push(['environment', '전체', '실내외 모두 보기']);
+    const nextDuration = [...fields.duration.options].find(option => Number(option.value) > Number(fields.duration.value));
+    if (nextDuration) options.push(['duration', nextDuration.value, `${nextDuration.textContent}으로 늘리기`]);
+    const budget = Number(fields.budget.value);
+    if (budget < 1000000) {
+      const nextBudget = Math.min(budget + 10000, 1000000);
+      options.push(['budget', nextBudget, `1인 예산 ${won(nextBudget)}으로 찾기`]);
+    }
+  }
+  if (options.length) message.insertAdjacentHTML('afterend', `<div class="plan-alternatives" aria-label="다시 검색할 조건">${options.map(([field, value, label]) => btn('retry-plan', label, '', 'outline', `data-field="${field}" data-value="${value}"`)).join('')}</div>`);
+}
+
+async function locationCoordinates() {
+  if (window.EodigajiNative) return window.EodigajiNative.requestLocation();
+  if (!navigator.geolocation) throw new Error('이 브라우저에서 위치를 확인할 수 없어요.');
+  return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(
+    position => resolve(position.coords), reject, { timeout: 8000, maximumAge: 0 }
+  ));
+}
+
+async function searchNearby(radius = 3000, conditions = state.conditions, excludePrevious = false, form = null) {
+  if (state.busy || !state.user) return;
+  const generation = accountGeneration;
+  const submit = form && dialog.querySelector('[type="submit"]');
+  if (submit) submit.disabled = true;
+  state.busy = true;
+  render();
+  let requestingLocation = false;
+  try {
+    if (!state.config.places) throw new Error('현재 위치 탐색은 실제 장소 검색을 연결한 뒤 이용할 수 있어요.');
+    requestingLocation = true;
+    const { latitude: lat, longitude: lng } = await locationCoordinates();
+    requestingLocation = false;
+    if (generation !== accountGeneration) return;
+    const course = await api('/api/plan', { ...conditions, startLocation: { lat, lng, radius }, ...(excludePrevious ? { excludePlaceIds: state.seenPlaceIds } : {}) });
+    if (generation !== accountGeneration) return;
+    acceptCourse(course);
+    Object.assign(state, { tab: 'explore', view: 'map', query: '', filter: '전체', selected: null });
+    if (dialog.open) closeDialog();
+    toast('현재 위치에서 출발하는 코스를 준비했어요.');
+  } catch (error) {
+    if (generation !== accountGeneration) return;
+    if (!form?.isConnected) { filtersDialog(); form = $('#conditions-form'); }
+    if (['NO_MATCHING_COURSE', 'NO_PLACES_IN_REGION'].includes(error.code)) {
+      form.dataset.nearbyRadius = radius;
+      form.dataset.excludePrevious = String(excludePrevious);
+      form.elements.region.disabled = true;
+      form.elements.region.value = '현재 위치 주변';
+      const manual = dialog.querySelector('[data-action="nearby-manual"]');
+      if (!manual) dialog.querySelector('.dialog-actions').insertAdjacentHTML('afterbegin', btn('nearby-manual', '지역 직접 입력', '', 'outline'));
+      const message = error.code === 'NO_PLACES_IN_REGION' ? `현재 위치에서 ${radius / 1000}km 이내에 검색된 장소가 없어요.` : error.message;
+      showPlanFailure({ code: error.code, message }, form, excludePrevious && error.code === 'NO_MATCHING_COURSE');
+    } else {
+      delete form.dataset.nearbyRadius;
+      form.elements.region.disabled = false;
+      form.elements.region.value = state.conditions.region;
+      const text = requestingLocation ? '현재 위치를 확인하지 못했어요. 위치 권한을 확인하거나 지역을 직접 입력해 주세요.' : error.message;
+      showPlanFailure(new Error(text), form);
+      form.elements.region.focus();
+    }
+  } finally {
+    if (submit) submit.disabled = false;
+    if (generation === accountGeneration) { state.busy = false; render(); }
+  }
 }
 function lookupCourse(id, revision) { if (revision !== undefined) { const match = state.messages.map(m => m.course).find(c => c && c.id === id && String(c.revision || 0) === String(revision)); if (match) return match; } return [state.course, ...state.saved, ...state.recommendations, ...state.messages.map(m => m.course)].find(c => c && c.id === id) || state.course; }
 function courseDialog(course) {
@@ -340,9 +422,13 @@ async function toggleSave(course, remove = false) {
 async function refreshRecommendations() {
   if (state.busy || !state.user) return;
   if (state.planningMemory.lockedPlaceIds?.length) { await sendChat('유지하기로 한 장소는 그대로 두고 나머지 장소는 새로운 장소로 교체해줘.'); return; }
+  if (departureTimeFor(state.course || {})) return searchNearby(3000, state.conditions, true);
   state.busy = true; render();
   try { const c = await api('/api/plan', { ...state.conditions, excludePlaceIds: state.seenPlaceIds }); acceptCourse(c); state.tab = 'explore'; state.query = ''; state.filter = '전체'; toast('이전 장소를 제외한 새 코스를 준비했어요.'); }
-  catch (e) { toast(e.message); }
+  catch (e) {
+    if (['NO_MATCHING_COURSE', 'NO_PLACES_IN_REGION'].includes(e.code)) { filtersDialog(); showPlanFailure(e, $('#conditions-form'), true); }
+    else toast(e.message);
+  }
   finally { state.busy = false; render(); }
 }
 async function share(course) {
@@ -353,8 +439,9 @@ async function share(course) {
       await api('/api/saved', { course: compact }); state.saved = [compact, ...state.saved.filter(c => c.id !== compact.id)];
     }
     const { url } = await api('/api/shares', { courseId: course.id });
-    try { await navigator.clipboard.writeText(url); toast('읽기 전용 공유 URL을 복사했어요.'); }
-    catch { openDialog('URL 복사', `<p>링크를 받은 사람은 로그인 없이 볼 수 있으며 편집할 수 없어요.</p><textarea class="share-text" readonly aria-label="공유할 코스 링크">${esc(url)}</textarea>`, btn('close', '닫기', '', 'primary')); $('.share-text')?.select(); }
+    try { await navigator.clipboard.writeText(url); toast('공유 링크를 복사했어요.'); } catch {}
+    openDialog('코스 공유', `<p>링크를 받은 사람은 로그인 없이 가능한 시간과 메모를 남길 수 있어요.</p><textarea class="share-text" readonly aria-label="공유할 코스 링크">${esc(url)}</textarea>`, `<a class="btn outline" href="${esc(url)}" target="_blank" rel="noopener noreferrer">공유 코스 열기</a>${btn('close', '닫기', '', 'primary')}`);
+    $('.share-text')?.select();
   } catch (e) { toast(e.message); }
 }
 // 이벤트 위임: 화면을 다시 그려도 data-action 속성으로 버튼 동작을 한 곳에서 처리합니다.
@@ -366,7 +453,18 @@ document.addEventListener('click', async e => {
     window.history.replaceState(null, '', window.location.pathname); closeDialog();
     if (state.user) await ensurePlan(); render(); window.scrollTo(0, 0); return;
   }
-  if (state.shared && !['auth-login', 'auth-signup', 'connections', 'install-app', 'close'].includes(action)) return;
+  if (state.shared && !['auth-login', 'auth-signup', 'connections', 'install-app', 'close', 'calendar'].includes(action)) return;
+  if (action === 'nearby') return searchNearby();
+  if (action === 'nearby-manual') return filtersDialog();
+  if (action === 'calendar') downloadCalendar(state.shared ? state.course : state.saved.find(course => course.id === id));
+  if (action === 'retry-plan') {
+    if (state.busy) return;
+    const form = target.closest('form');
+    if (target.dataset.field === 'nearby') form.dataset.nearbyRadius = target.dataset.value;
+    else if (target.dataset.field) form.elements.namedItem(target.dataset.field).value = target.dataset.value;
+    else delete form.dataset.excludePrevious;
+    form.requestSubmit();
+  }
   if (action === 'edit-course') { const c = state.saved.find(c => c.id === id); if (c) { state.editor = structuredClone(c); state.tab = 'course'; render(); } return; }
   if (action === 'cancel-edit') { state.editor = null; render(); return; }
   if (action === 'save-edit') { await saveEditor(); return; }
@@ -426,6 +524,13 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && state.mapE
 document.addEventListener('submit', async e => {
   e.preventDefault();
   if (e.target.id === 'chat-form') return sendChat(new FormData(e.target).get('message'));
+  if (e.target.id === 'availability-form' && state.shared && state.shareId) return loadAvailability(e.target);
+  if (e.target.id === 'calendar-date-form') {
+    const course = state.shared ? state.course : state.saved.find(item => item.id === e.target.dataset.id);
+    downloadCalendar(course, new FormData(e.target).get('date'));
+    closeDialog();
+    return;
+  }
   if (e.target.id === 'profile-form') {
     if (!advanceProfileStep(e.target)) return;
     const data = new FormData(e.target); const name = data.get('name').trim();
@@ -436,10 +541,13 @@ document.addEventListener('submit', async e => {
   }
   if (e.target.id === 'conditions-form' && !state.busy) {
     const conditions = { ...state.conditions, ...Object.fromEntries(new FormData(e.target)) };
-    conditions.partySize = conditions.purpose === '여행' ? Number(conditions.partySize || 2) : 2; state.busy = true;
+    conditions.partySize = conditions.purpose === '여행' ? Number(conditions.partySize || 2) : 2;
+    if (e.target.dataset?.nearbyRadius) return searchNearby(Number(e.target.dataset.nearbyRadius), conditions, e.target.dataset.excludePrevious === 'true', e.target);
+    state.busy = true;
     const submit = dialog.querySelector('[type="submit"]'); submit.disabled = true; submit.textContent = '코스를 찾고 있어요…';
-    try { const course = await api('/api/plan', { ...conditions, excludePlaceIds: state.seenPlaceIds }); acceptCourse(course); state.query = ''; state.filter = '전체'; state.selected = null; state.tab = 'explore'; closeDialog(); render(); toast('선택한 조건으로 코스를 준비했어요.'); }
-    catch (err) { if ($('#form-error')) $('#form-error').textContent = err.message; }
+    e.target.querySelector?.('.plan-alternatives')?.remove();
+    try { const course = await api('/api/plan', conditions); acceptCourse(course); state.query = ''; state.filter = '전체'; state.selected = null; state.tab = 'explore'; closeDialog(); render(); toast('선택한 조건으로 코스를 준비했어요.'); }
+    catch (err) { showPlanFailure(err, e.target); }
     finally { state.busy = false; render(); if (submit.isConnected) { submit.disabled = false; submit.innerHTML = `${icon('spark')}이 조건으로 코스 찾기`; } }
   }
 });
@@ -454,9 +562,10 @@ async function init() {
     const shareId = new URLSearchParams(window.location.search).get('share');
     const shared = shareId ? (await api('/api/shares/' + encodeURIComponent(shareId))).course : readSharedCourse(window.location.hash);
     if (state.user) await loadAccount();
-    if (shared) { state.shared = true; acceptCourse(shared); state.places = shared.places; state.courseChosen = true; state.tab = 'course'; }
+    if (shared) { state.shared = true; state.shareId = shareId; state.availability = []; acceptCourse(shared); state.places = shared.places; state.courseChosen = true; state.tab = 'course'; }
     else if (state.user) await ensurePlan();
     render();
+    if (shared && shareId) await loadAvailability();
     if (returnedFromEmail) {
       authDialog('login');
       $('#auth-error').textContent = confirmation.has('error') || confirmation.has('error_code')
@@ -551,16 +660,69 @@ async function flushWorkspace() {
 }
 async function ensurePlan() {
   if (!state.course) { const c = await api('/api/plan', state.conditions); acceptCourse(c); }
+  if (!state.places.length && departureTimeFor(state.course)) state.places = state.course.availablePlaces || state.course.places;
   if (!state.places.length) state.places = state.course.availablePlaces || await api('/api/places?region=' + encodeURIComponent(state.conditions.region));
 }
 function blocks(course, editable = false) {
   if (editable) updateSchedule(course);
-  return course.places.map((p, i) => `<article class="course-block" ${editable ? `draggable="true" data-block-index="${i}"` : ''}>
+  const departure = departureTimeFor(course);
+  const firstLeg = departure ? `<div class="transport-block">출발 → 첫 장소 · ${esc(course.departureTransport)} 약 ${departure}분 (거리 기반 추정)</div>` : '';
+  return firstLeg + course.places.map((p, i) => `<article class="course-block" ${editable ? `draggable="true" data-block-index="${i}"` : ''}>
     <div class="block-top"><span class="block-index">${i + 1}</span><strong>${esc(p.time || '')} · ${!editable && !state.shared ? `<button class="block-place-link" data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button>` : esc(p.name)}</strong>${editable ? `<span class="block-controls"><span class="drag-handle" title="드래그해서 순서 변경">⠿</span>${btn('block-up', '↑', '', 'outline', `data-index="${i}" aria-label="${i+1}번 장소 위로" ${i === 0 ? 'disabled' : ''}`)}${btn('block-down', '↓', '', 'outline', `data-index="${i}" aria-label="${i+1}번 장소 아래로" ${i === course.places.length-1 ? 'disabled' : ''}`)}${btn('block-remove', '삭제', '', 'ghost', `data-index="${i}"`)}</span>` : ''}</div>
     <div class="block-body"><figure>${photo(p)}<figcaption>${p.photoUrl ? '장소 제공 사진 · 로딩 실패 시 예시 이미지' : '예시 이미지 · 실제 장소 사진 아님'}</figcaption></figure><div><p>${esc(p.category)} · ${esc(p.address || p.region)}</p>${editable ? `<div class="form-grid"><label class="field">체류 시간 (분)<input type="number" min="5" max="${stayLimit(p)}" data-block-field="stay" data-index="${i}" value="${Number(p.stay) || 40}"></label><label class="field">예상 비용 (원)<input type="number" min="0" max="1000000" data-block-field="cost" data-index="${i}" value="${Number(p.cost) || 0}"></label></div><label class="field">메모<textarea maxlength="1000" data-block-field="note" data-index="${i}" placeholder="예약 시간, 하고 싶은 일 등">${esc(p.note || '')}</textarea></label>` : `<p>체류 ${Number(p.stay) || 0}분 · 1인 예상 ${won(p.cost)}</p>${p.note ? `<p class="block-note">${esc(p.note)}</p>` : ''}`}</div></div></article>${i < course.places.length - 1 ? `<div class="transport-block">↓ ${editable ? `<select aria-label="${i+1}번 구간 이동수단" data-block-field="transport" data-index="${i}">${['도보','자동차','대중교통'].map(m => `<option ${m === (p.transport || course.conditions.transport) ? 'selected' : ''}>${m}</option>`).join('')}</select><label>예상 <input aria-label="${i+1}번 구간 이동 시간" type="number" min="0" max="600" value="${course.places[i+1].travel || 10}" data-block-field="travelNext" data-index="${i}">분</label>` : `${esc(p.transport || course.conditions.transport)} 이동 · 약 ${Number(course.places[i+1].travel) || 0}분 · ${course.places[i+1].travelActual ? '조회 거리 ' : '추정 거리 '}${Number.isFinite(course.places[i+1].travelDistance) ? course.places[i+1].travelDistance + 'm' : '미확인'}`}${!editable ? routeLinks(p, course.places[i+1]) : ''}</div>` : ''}`).join('');
 }
 function sharedPage(course) {
-  return greeting(esc(course.title), '링크를 받은 누구나 볼 수 있는 읽기 전용 코스입니다.', 'SHARED COURSE') + '<div class="shared-notice">읽기 전용 · 공유 시점에 저장된 코스 · 편집할 수 없어요</div><p>' + esc(course.conditions.date || '날짜 미정') + ' · ' + esc(course.conditions.region) + ' · 예상 ' + won(course.totalCost) + '</p>' + groupSummary(course) + '<div class="block-list">' + blocks(course) + '</div>';
+  return `${greeting(esc(course.title), '공유된 코스와 방문 순서를 확인하세요.', 'SHARED COURSE')}
+    <div class="shared-notice">공유 시점에 저장된 코스</div><p>${esc(course.conditions.date || '날짜 미정')} · ${esc(course.conditions.region)} · 예상 ${won(course.totalCost)}</p>
+    ${groupSummary(course)}${btn('calendar', '캘린더에 추가', 'calendar', 'outline')}
+    ${state.shareId ? `<section class="availability-panel" aria-label="가능한 시간">
+      <h2>가능한 시간</h2><div id="availability-list">${availabilityList()}</div>
+      <form id="availability-form" class="stack"><div class="form-grid">
+        <label class="field">날짜<input type="date" name="date" value="${esc(course.conditions.date || '')}" required></label>
+        <label class="field">별명 (선택)<input name="name" maxlength="30" autocomplete="nickname"></label>
+        <label class="field">시작 시간<input type="time" name="start" required></label>
+        <label class="field">종료 시간<input type="time" name="end" required></label>
+      </div><label class="field">메모 (선택)<textarea name="memo" maxlength="300" rows="2" placeholder="예: 5시부터 8시까지 가능해요"></textarea></label>
+      <p class="form-note">한국시간 기준이에요. 이 링크를 가진 사람은 메모를 볼 수 있어요.</p>
+      <button class="btn primary" type="submit">가능한 시간 남기기</button></form><p id="availability-status" role="status"></p>
+    </section>` : ''}<div class="block-list">${blocks(course)}</div>`;
+}
+
+function availabilityList() {
+  if (!state.availability?.length) return '<p>아직 남긴 시간이 없어요.</p>';
+  return `<ul>${state.availability.map(note => `<li><strong>${esc(note.date)} · ${esc(note.start)}–${esc(note.end)}</strong> · ${esc(note.name || '일행')}${note.memo ? `<p>${esc(note.memo)}</p>` : ''}</li>`).join('')}</ul>`;
+}
+
+async function loadAvailability(form) {
+  const status = $('#availability-status');
+  const submit = form?.querySelector('button[type="submit"]');
+  if (submit?.disabled) return;
+  if (submit) submit.disabled = true;
+  try {
+    const body = form ? Object.fromEntries(new FormData(form)) : undefined;
+    const { notes } = await api(`/api/shares/${encodeURIComponent(state.shareId)}/availability`, body);
+    state.availability = notes;
+    const list = $('#availability-list');
+    if (list) list.innerHTML = availabilityList();
+    if (form) { form.elements.memo.value = ''; status.textContent = '가능한 시간을 저장했어요.'; }
+  } catch (error) { status.textContent = error.message; }
+  finally { if (submit) submit.disabled = false; }
+}
+
+function downloadCalendar(course, date = course?.conditions.date) {
+  if (!course) return;
+  if (!date) {
+    openDialog('캘린더에 추가', `<form id="calendar-date-form" data-id="${esc(course.id)}"><label class="field">일정 날짜<input type="date" name="date" required></label></form>`, '<button class="btn primary" type="submit" form="calendar-date-form">일정 파일 받기</button>');
+    return;
+  }
+  try {
+    const sharedUrl = state.shared && state.shareId ? `${window.location.origin}/?share=${encodeURIComponent(state.shareId)}` : '';
+    const file = courseCalendar({ ...course, conditions: { ...course.conditions, date } }, new Date(), sharedUrl);
+    const url = URL.createObjectURL(new Blob([file], { type: 'text/calendar;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url; link.download = '어디가지-코스.ics'; document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  } catch (error) { toast(error.message); }
 }
 function editorPage() {
   const c = state.editor;
@@ -574,6 +736,7 @@ function moveBlock(from, to) {
 }
 function updateSchedule(c) {
   let minute = c.conditions.start.split(':').reduce((h, m) => Number(h) * 60 + Number(m)); const start = minute;
+  minute += departureTimeFor(c);
   for (const [i, p] of c.places.entries()) {
     if (i) minute += Number(p.travel) || 0;
     p.time = `${String(Math.floor(minute / 60) % 24).padStart(2,'0')}:${String(minute % 60).padStart(2,'0')}`;

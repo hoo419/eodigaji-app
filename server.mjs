@@ -2,7 +2,8 @@
 import http from 'node:http';
 import { applyCourseDecision, planningMemory, localCourseDecision } from './lib/conversation-planner.mjs';
 import { randomUUID } from 'node:crypto';
-import { snapshot } from './public/course-share.js';
+import { isDeepStrictEqual } from 'node:util';
+import { snapshot, normalizeAvailability } from './public/course-share.js';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
@@ -41,12 +42,30 @@ export function createApp({ env = process.env, connections = createConnections(e
   const rates = new Map(); let day = '', aiCount = 0;
   const status = connections.publicConfig();
   async function plan(input) {
-    const { excludePlaceIds = [], ...conditions } = input;
+    const { excludePlaceIds = [], startLocation, ...conditions } = input;
     if (!Array.isArray(excludePlaceIds) || excludePlaceIds.length > 120 || excludePlaceIds.some(id => typeof id !== 'string' || id.length > 100)) throw new Error('이전 장소 정보를 확인해 주세요.');
-    const catalogue = status.places ? await connections.searchPlaces(conditions.region || '성수', { excludePlaceIds, ...(Number.isFinite(conditions.destinationLat) && Number.isFinite(conditions.destinationLng) ? {center:{lat:conditions.destinationLat,lng:conditions.destinationLng}} : {}) }) : places;
+    let origin, radius;
+    if (startLocation !== undefined) {
+      const { lat, lng, radius: requestedRadius } = startLocation || {};
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || ![3000, 5000].includes(requestedRadius)) throw new Error('현재 위치와 검색 범위를 확인해 주세요.');
+      if (!status.places) throw new Error('현재 위치 탐색은 실제 장소 검색을 연결한 뒤 이용할 수 있어요.');
+      origin = { lat, lng }; radius = requestedRadius;
+      for (const key of ['destinationName', 'destinationAddress', 'destinationUrl', 'destinationLat', 'destinationLng']) delete conditions[key];
+      conditions.region = '현재 위치 주변';
+    }
+    const center = origin || (Number.isFinite(conditions.destinationLat) && Number.isFinite(conditions.destinationLng) ? { lat: conditions.destinationLat, lng: conditions.destinationLng } : undefined);
+    let catalogue = status.places ? await connections.searchPlaces(conditions.region || '성수', { excludePlaceIds, ...(center ? { center } : {}), ...(origin ? { radius, privateCenter: true } : {}) }) : places;
+    if (origin) {
+      const locality = catalogue.find(place => /^[가-힣]+ [가-힣]+[시군구]\s/.test(place.address || ''))?.address.trim().split(/\s+/).slice(0, 2).join(' ');
+      conditions.region = locality || conditions.region;
+      catalogue = catalogue.map(place => ({ ...place, region: conditions.region }));
+    }
     let recommendations;
-    try { recommendations = recommendCourses(conditions, catalogue, { excludePlaceIds }); }
-    catch (e) { if (excludePlaceIds.length && /조건에 맞는 코스/.test(e.message)) throw new Error('이전 장소를 제외하면 조건에 맞는 새 코스가 부족해요. 지역·예산·종류 조건을 바꿔 주세요. 이전 장소를 몰래 다시 넣지 않습니다.'); throw e; }
+    try { recommendations = recommendCourses(conditions, catalogue, { excludePlaceIds, origin }); }
+    catch (e) {
+      if (e.code === 'NO_MATCHING_COURSE' && excludePlaceIds.length) e.message = '이전 장소를 제외하면 조건에 맞는 새 코스가 부족해요. 지역·예산·종류 조건을 바꿔 주세요.';
+      throw e;
+    }
     return { ...recommendations[0], recommendations, ...(status.places ? { availablePlaces: catalogue } : {}) };
   }
   return http.createServer(async (req, res) => {
@@ -84,9 +103,15 @@ export function createApp({ env = process.env, connections = createConnections(e
       if (req.method === 'GET' && path === '/api/config') return json(res, 200, status);
       if (['/api/places', '/api/plan', '/api/chat', '/api/route', '/api/workspace'].includes(path) && !await sessions.get(req)) return json(res, 401, { error: '로그인 후 이용해 주세요.' });
       if (path.startsWith('/api/shares/')) {
+        const [, id, section] = /^\/api\/shares\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(availability))?$/.exec(path) || [];
+        if (!id) return json(res, 404, { error: '공유 코스를 찾을 수 없어요.' });
+        if (section) {
+          if (!['GET', 'POST'].includes(req.method)) return json(res, 405, { error: '지원하지 않는 요청입니다.' });
+          const note = req.method === 'POST' ? normalizeAvailability(await readJson(req)) : null;
+          const notes = await connections.shareAvailability(id, note);
+          return json(res, notes === null ? 404 : note ? 201 : 200, notes === null ? { error: '공유 코스를 찾을 수 없어요.' } : { notes });
+        }
         if (req.method !== 'GET') return json(res, 405, { error: '공유 코스는 읽기 전용입니다.' });
-        const id = path.slice('/api/shares/'.length);
-        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return json(res, 404, { error: '공유 코스를 찾을 수 없어요.' });
         const course = await connections.readShare(id);
         return json(res, course ? 200 : 404, course ? { course } : { error: '공유 코스를 찾을 수 없어요.' });
       }
@@ -97,8 +122,11 @@ export function createApp({ env = process.env, connections = createConnections(e
         const body = await readJson(req);
         const rows = await connections.database('saved_courses', 'GET', session.token, `?user_id=eq.${encodeURIComponent(session.user.id)}&course_id=eq.${encodeURIComponent(String(body.courseId))}`);
         if (!rows[0]) return json(res, 404, { error: '먼저 내 코스에 저장해 주세요.' });
-        const id = randomUUID();
-        await connections.database('shared_courses', 'POST', session.token, '', { id, user_id: session.user.id, data: snapshot(rows[0].data) });
+        const data = snapshot(rows[0].data);
+        const shares = await connections.database('shared_courses', 'GET', session.token, `?select=id,data&data->>id=eq.${encodeURIComponent(data.id)}&order=created_at.asc`);
+        const existing = shares.find(row => isDeepStrictEqual(row.data, data));
+        const id = existing?.id || randomUUID();
+        if (!existing) await connections.database('shared_courses', 'POST', session.token, '', { id, user_id: session.user.id, data });
         return json(res, 200, { id, url: `${origin}/?share=${id}` });
       }
       if (path === '/api/workspace') {
@@ -217,7 +245,7 @@ export function createApp({ env = process.env, connections = createConnections(e
       const asset = assets[path]; if (!asset) return json(res, 404, { error: '페이지를 찾을 수 없어요.' });
       const file = await readFile(resolve(publicDir, asset[0]));
       res.writeHead(200, { 'Content-Type': `${asset[1]}; charset=utf-8`, 'Cache-Control': 'no-cache' }); res.end(file);
-    } catch (error) { json(res, error.code === 'ENOENT' ? 404 : 400, { error: error.code === 'ENOENT' ? '페이지를 찾을 수 없어요.' : error.message }); }
+    } catch (error) { json(res, error.code === 'ENOENT' ? 404 : 400, { error: error.code === 'ENOENT' ? '페이지를 찾을 수 없어요.' : error.message, ...(['NO_MATCHING_COURSE', 'NO_PLACES_IN_REGION'].includes(error.code) ? { code: error.code } : {}) }); }
   });
 }
 // 직접 실행할 때만 환경 파일을 읽고 포트를 엽니다. 테스트에서 import해도 서버가 자동 실행되지 않습니다.
