@@ -7,7 +7,7 @@ const source = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8'
 function harness(windowOptions = {}, navigator = {}) {
   const handlers = {};
   const submitHandlers = [];
-  const node = { addEventListener() {}, remove() {} };
+  const node = { addEventListener() {}, remove() {}, focus() {} };
   const context = vm.createContext({ document: { querySelector: () => node, addEventListener(key, fn) { if (key === 'submit') submitHandlers.push(fn); } }, window: { addEventListener: (key, fn) => { handlers[key] = fn; }, matchMedia: () => ({ matches: false, addEventListener() {} }), ...windowOptions }, navigator, localStorage: { getItem: () => null }, icon: () => '' });
   vm.runInContext(source, context);
   return { context, handlers, submitHandlers, run: code => vm.runInContext(code, context) };
@@ -28,6 +28,28 @@ test('changing exploration conditions searches previously recommended places aga
   assert.equal(h.run('state.course.conditions.budget'), 40000);
   assert.equal(h.run('state.course.conditions.environment'), '실내');
   assert.ok(h.run('state.course.places.some(p => initial.recommendations.some(c => c.places.some(q => q.id === p.id)))'));
+});
+test('new chats reset planning context and earlier chats restore their own course and messages', () => {
+  const h = harness();
+  let sequence = 0;
+  h.context.crypto = { randomUUID: () => `chat-${++sequence}` };
+  h.context.structuredClone = structuredClone;
+  h.context.course = recommendCourses({ region: '연남' })[0];
+  h.run(`render = () => {}; acceptCourse(course);
+    state.messages = [{ role: 'user', text: '연남에서 산책' }];
+    state.planningMemory.lockedPlaceIds = [course.places[0].id];
+    switchChat()`);
+  assert.equal(h.run('state.course'), null);
+  assert.equal(h.run('state.conditions.region'), '성수');
+  assert.equal(h.run('state.seenPlaceIds.length'), 0);
+  assert.equal(h.run('chatTitle(state.messages)'), '');
+  assert.equal(h.run('state.previousChats.length'), 1);
+  h.run(`state.messages = [{ role: 'user', text: '새 일정' }];
+    switchChat(state.previousChats[0].id)`);
+  assert.equal(h.run('state.course.id'), h.context.course.id);
+  assert.equal(h.run('chatTitle(state.messages)'), '연남에서 산책');
+  assert.equal(h.run('state.planningMemory.lockedPlaceIds[0]'), h.context.course.places[0].id);
+  assert.equal(h.run('chatTitle(workspaceSnapshot().previousChats[0].messages)'), '새 일정');
 });
 test('installed native Android and iOS/PWA modes suppress install controls', () => {
   assert.equal(harness().run('installed()'), false);

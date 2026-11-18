@@ -151,6 +151,11 @@ dialog.auth-dialog {
 .availability-panel form > button { justify-self: start; }
 .availability-panel [role="status"] { margin-top: 8px; }
 .filter-end { gap: 8px; flex-wrap: wrap; }
+.chat-heading-row { flex-wrap: wrap; }
+.chat-heading-row strong { min-width: 0; overflow-wrap: anywhere; }
+.chat-session-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.chat-history-list { display: grid; gap: 8px; list-style: none; padding: 0; }
+.chat-history-list .btn { width: 100%; justify-content: flex-start; text-align: left; overflow-wrap: anywhere; white-space: normal; }
 @media (max-width: 740px) {
   .filters { flex-wrap: wrap; row-gap: 10px; }
   .filter-end { flex-basis: 100%; justify-content: flex-end; }

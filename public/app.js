@@ -15,19 +15,21 @@ const readProfile = stored('profile', null);
 const readSaved = stored('saved', []);
 // 화면 상태의 중심입니다. 상태를 바꾼 뒤 render()를 호출해 해당 화면을 다시 그립니다.
 const defaultConditions = () => ({ region: '성수', purpose: '데이트', partySize: 2, budget: 50000, duration: 240, start: '14:00', date: dateISO, environment: '전체', mood: '여유로운', transport: '도보' });
+const welcomeMessages = () => [{ role: 'assistant', text: '안녕하세요! 오늘은 어떤 하루를 보내고 싶으세요?\n\n“성수에서 조용한 실내 데이트, 1인 3만원”처럼 말해 주세요.' }];
 const state = {
   config: { ai: false, places: false, map: false, auth: false }, user: null,
   tab: 'explore', view: 'map', filter: '전체', query: '', zoom: 1, places: [], course: null, selected: null, recommendations: [], courseChosen: false, mapExpanded: false, routeMode: null, routeDetails: null, routeBusy: false,
   profile: null, shared: false, editor: null,
-  saved: [], seenPlaceIds: [], planningMemory: {}, previousPlan: null,
+  saved: [], seenPlaceIds: [], planningMemory: {}, previousPlan: null, chatId: null, previousChats: [],
   conditions: defaultConditions(),
-  messages: [{ role: 'assistant', text: '안녕하세요! 오늘은 어떤 하루를 보내고 싶으세요?\n\n“성수에서 조용한 실내 데이트, 1인 3만원”처럼 말해 주세요. 함께 코스를 만들어 볼게요.' }],
+  messages: welcomeMessages(),
   chatting: false, busy: false,
 };
 let modalReturn = null, draftProfile = {}, draftCourse = null, toastTimer, loginDialogLocked = false, accountGeneration = 0;
 function clearPrivateState() {
   accountGeneration++; accountLoaded = false; lastWorkspace = ''; clearTimeout(workspaceTimer);
   Object.assign(state, { user: null, profile: null, saved: [], course: null, places: [], messages: [], recommendations: [], editor: null, routeDetails: null, seenPlaceIds: [], planningMemory: {}, previousPlan: null, conditions: defaultConditions(), tab: 'explore', view: 'map', filter: '전체', query: '', zoom: 1, selected: null, courseChosen: false, mapExpanded: false, routeMode: null, routeBusy: false, chatting: false, busy: false });
+  state.chatId = null; state.previousChats = [];
   draftProfile = {}; draftCourse = null;
 }
 function persist(key, value) { try { localStorage.setItem(`eodigaji.${key}`, JSON.stringify(value)); return true; } catch { toast('브라우저 저장 공간을 사용할 수 없어 이번 화면에서만 유지됩니다.'); return false; } }
@@ -142,7 +144,7 @@ async function loadCourseRoute(mode) {
   if (course.demo) return;
   try {
     const result=await api('/api/route',{mode,points:course.places.map(p=>({name:p.name,lat:p.lat,lng:p.lng}))});
-    if(state.course?.id===course.id && state.routeMode===mode) {
+    if(state.course===course && state.routeMode===mode) {
       state.routeDetails=result;
       course.conditions.transport = mode;
       course.places.forEach(p => { p.transport = mode; });
@@ -156,7 +158,7 @@ async function loadCourseRoute(mode) {
       course.revision = (course.revision || 0) + 1;
     }
   } catch {}
-  finally { if(state.course?.id===course.id && state.routeMode===mode){state.routeBusy=false;render();} }
+  finally { if(state.course===course && state.routeMode===mode){state.routeBusy=false;render();} }
 }
 function coursePage() {
   const course = state.course;
@@ -188,7 +190,46 @@ function conversationContext() {
   return `<div class="conversation-context"><strong>지금 수정하는 코스</strong><ol>${state.course.places.map(p => `<li>${esc(p.name)}${state.planningMemory.lockedPlaceIds?.includes(p.id) ? '<span class="tag">유지</span>' : ''}</li>`).join('')}</ol>${state.planningMemory.preferences?.length ? `<small>요청한 취향: ${state.planningMemory.preferences.map(esc).join(' · ')} (확인되지 않은 정보는 보장하지 않아요)</small>` : ''}${state.planningMemory.history?.length ? `<details><summary>최근 변경 기록</summary><ul>${state.planningMemory.history.slice(-5).map(text => `<li>${esc(text)}</li>`).join('')}</ul></details>` : ''}${state.planningMemory.pendingConditions ? '<p>새 조건과 충돌하여 코스는 유지 중이에요. 다음 대화에서 조정해 주세요.</p>' : ''}<div class="conversation-actions">${btn('save', hasSavedChanges(state.course) ? '변경사항 저장' : isSaved(state.course) ? '♥ 저장됨' : '코스 저장', 'heart', 'outline', `data-id="${esc(state.course.id)}"`)}${state.previousPlan ? btn('undo-chat-edit', '직전 변경 되돌리기', '', 'outline') : ''}</div></div>`;
 }
 function chatPanel() {
-  return `<section class="chat-panel" aria-label="AI 코스 계획 체험"><div class="chat-heading"><div class="row"><span class="ai-avatar">${icon('spark')}</span><strong>우리의 하루를 함께 계획해요</strong></div><p>샘플 대화 체험 · 입력한 조건을 코스에 반영해요</p></div>${conversationContext()}<div class="messages" aria-live="polite" aria-label="대화 내역">${state.messages.map(m => `<div class="bubble ${m.role === 'user' ? 'user' : ''}">${esc(m.text)}</div>${m.course ? `<div class="chat-route"><h3>${esc(m.course.title)}</h3><p>${m.course.places.map(p => esc(p.name)).join(' → ')}</p>${btn('chat-course', '이 코스를 지도에서 보기', 'map', '', `data-id="${esc(m.course.id)}" data-revision="${m.course.revision || 0}"`)}</div>` : ''}`).join('')}${state.chatting ? '<div class="bubble" role="status">조건에 맞는 하루를 찾고 있어요…</div>' : ''}</div><div class="suggestions">${['두 번째 장소는 유지해줘', '이동을 최소로 해줘', '식당은 제외해줘'].map(x => `<button data-action="suggest" data-message="${x}" ${state.chatting ? 'disabled' : ''}>${x}</button>`).join('')}</div><form id="chat-form" class="chat-compose"><textarea id="chat-input" name="message" placeholder="예: 두 번째 장소는 유지하고 식당만 바꿔줘" aria-label="데이트 요청 메시지" maxlength="1500" required ${state.chatting ? 'disabled' : ''}></textarea><button aria-label="메시지 보내기" ${state.chatting ? 'disabled' : ''}>${icon('arrow')}</button></form><p class="chat-note">현재 코스를 기준으로 수정합니다. 저장 버튼을 눌러야 저장한 코스에 반영됩니다.</p></section>`;
+  const disabled = state.chatting || state.busy ? 'disabled' : '';
+  const suggestions = state.course ? ['두 번째 장소는 유지해줘', '이동을 최소로 해줘', '식당은 제외해줘'] : ['성수에서 실내 데이트 코스 추천해줘', '연남에서 1인 3만원 코스 짜줘'];
+  return `<section class="chat-panel" aria-label="AI와 계획하기"><div class="chat-heading"><div class="row chat-heading-row"><span class="ai-avatar">${icon('spark')}</span><strong>${esc(chatTitle(state.messages) || 'AI와 계획하기')}</strong><div class="chat-session-actions">${btn('new-chat', '새 채팅', 'plus', 'outline', disabled)}${btn('chat-history', '이전 채팅', 'clock', 'outline', disabled)}</div></div></div>${conversationContext()}<div class="messages" aria-live="polite" aria-label="대화 내역">${state.messages.map(m => `<div class="bubble ${m.role === 'user' ? 'user' : ''}">${esc(m.text)}</div>${m.course ? `<div class="chat-route"><h3>${esc(m.course.title)}</h3><p>${m.course.places.map(p => esc(p.name)).join(' → ')}</p>${btn('chat-course', '이 코스를 지도에서 보기', 'map', '', `data-id="${esc(m.course.id)}" data-revision="${m.course.revision || 0}"`)}</div>` : ''}`).join('')}${state.chatting ? '<div class="bubble" role="status">조건에 맞는 하루를 찾고 있어요…</div>' : ''}</div><div class="suggestions">${suggestions.map(text => `<button data-action="suggest" data-message="${esc(text)}" ${disabled}>${esc(text)}</button>`).join('')}</div><form id="chat-form" class="chat-compose"><textarea id="chat-input" name="message" placeholder="예: 성수에서 실내로, 1인 3만원" aria-label="데이트 요청 메시지" maxlength="1500" required ${disabled}></textarea><button aria-label="메시지 보내기" ${disabled}>${icon('arrow')}</button></form><p class="chat-note">코스 저장 버튼을 누르면 저장한 코스에 추가돼요.</p></section>`;
+}
+
+function chatTitle(messages) {
+  const text = messages.find(message => message?.role === 'user')?.text?.trim();
+  return text ? text.replace(/\s+/g, ' ').slice(0, 44) : '';
+}
+
+function showChatHistory() {
+  const list = state.previousChats.map(chat => `<li>${btn('open-chat', esc(chatTitle(chat.messages)), '', 'outline', `data-id="${esc(chat.id)}"`)}</li>`).join('');
+  openDialog('이전 채팅', list ? `<ul class="chat-history-list">${list}</ul>` : '<p>이전 채팅이 아직 없어요. 새 채팅을 시작하면 현재 대화를 여기서 다시 열 수 있어요.</p>', btn('close', '닫기', '', 'outline'));
+}
+
+function switchChat(id) {
+  if (state.chatting || state.busy) return;
+  const next = id ? state.previousChats.find(chat => chat.id === id) : null;
+  if (id && !next) return;
+  const prior = state.previousChats.filter(chat => chat.id !== id);
+  if (chatTitle(state.messages)) prior.unshift(structuredClone({ id: state.chatId || crypto.randomUUID(), ...chatContext() }));
+  Object.assign(state, {
+    chatId: next?.id || crypto.randomUUID(), previousChats: prior,
+    course: null, messages: next?.messages || welcomeMessages(), conditions: next?.conditions || defaultConditions(),
+    planningMemory: {}, previousPlan: null, seenPlaceIds: next?.seenPlaceIds || [], places: [], recommendations: [],
+    routeMode: null, routeDetails: null, routeBusy: false, courseChosen: false, mapExpanded: false, selected: null,
+    editor: null, tab: 'explore', view: 'chat', query: '', filter: '전체',
+  });
+  if (next?.course) {
+    acceptCourse(next.course);
+    state.conditions = next.conditions || next.course.conditions;
+    state.places = next.course.places;
+    state.courseChosen = true;
+  }
+  state.planningMemory = next?.planningMemory || {};
+  state.previousPlan = next?.previousPlan || null;
+  if (dialog.open) closeDialog();
+  render();
+  $('#chat-input')?.focus();
+  if (state.user && accountLoaded) void flushWorkspace();
 }
 function timeNotice(c) { const left = Math.max(0, Math.round(c.conditions.duration - c.minutes)); return left ? `<aside class="remaining-time" role="status">${esc(c.title)} · ${left <= 60 ? '여유 시간' : '남은 시간'} ${length(left)}</aside>` : ''; }
 function savedPage() { return `${greeting('다음에 함께 가요.', '마음에 든 하루를 모아 두었어요. 언제든 다시 꺼내 보세요.', 'OUR LITTLE COLLECTION')}${state.saved.length ? `<div class="saved-grid">${state.saved.map(c => courseCard(c, true)).join('')}</div><div class="saved-time-notices">${state.saved.map(timeNotice).join('')}</div>` : `<div class="empty-state">${icon('heart')}<h2>아직 저장한 코스가 없어요.</h2><p>마음에 드는 코스의 하트를 눌러 주세요.<br>우리의 다음 데이트가 여기에 모여요.</p>${btn('nav', '첫 번째 코스 찾아보기', 'arrow', 'primary', 'data-tab="explore"')}</div>`}`; }
@@ -401,8 +442,9 @@ async function finishProfile(location) {
 }
 // 현재 조건과 최근 대화를 함께 보내며 처리 중에는 중복 전송을 막습니다.
 async function sendChat(message) {
-  if (state.chatting || !message.trim()) return;
+  if (state.chatting || state.busy || !message.trim()) return;
   const generation = accountGeneration;
+  state.chatId ||= crypto.randomUUID();
   state.messages.push({ role: 'user', text: message.trim() }); state.chatting = true; state.view = 'chat'; state.tab = 'explore'; render();
     try { const reply = await api('/api/chat', { message, currentCourse: compactCourse(state.course), memory: state.planningMemory, conditions: state.conditions, excludePlaceIds: state.seenPlaceIds, history: state.messages.slice(-25, -1).map(m => ({ role: m.role, text: m.text })) }); if (generation !== accountGeneration) return; if (reply.course || reply.memory) state.previousPlan = { course: structuredClone(state.course), memory: structuredClone(state.planningMemory) }; state.messages.push({ role: 'assistant', text: reply.message, course: reply.course }); if (reply.memory) state.planningMemory = reply.memory; if (reply.conditions) state.conditions = reply.conditions; if (reply.course) { acceptCourse(reply.course); state.courseChosen = true; state.query = ''; state.filter = '전체'; } }
   catch (e) { if (generation === accountGeneration) state.messages.push({ role: 'assistant', text: e.message }); }
@@ -456,6 +498,9 @@ document.addEventListener('click', async e => {
   if (state.shared && !['auth-login', 'auth-signup', 'connections', 'install-app', 'close', 'calendar'].includes(action)) return;
   if (action === 'nearby') return searchNearby();
   if (action === 'nearby-manual') return filtersDialog();
+  if (action === 'new-chat') return switchChat();
+  if (action === 'chat-history') return showChatHistory();
+  if (action === 'open-chat') return switchChat(id);
   if (action === 'calendar') downloadCalendar(state.shared ? state.course : state.saved.find(course => course.id === id));
   if (action === 'retry-plan') {
     if (state.busy) return;
@@ -600,11 +645,16 @@ async function loadAccount() {
   if (data.workspace) {
     const w = data.workspace;
     if (Array.isArray(w.seenPlaceIds)) state.seenPlaceIds = w.seenPlaceIds.filter(id => typeof id === 'string').slice(-120);
-    if (w.conditions) state.conditions = w.conditions;
+    state.chatId = typeof w.chatId === 'string' ? w.chatId : null;
+    state.previousChats = Array.isArray(w.previousChats) ? w.previousChats.filter(chat => chat && typeof chat.id === 'string' && Array.isArray(chat.messages) && chat.messages.some(m => m?.role === 'user')) : [];
     if (Array.isArray(w.messages)) state.messages = w.messages;
+    else state.messages = welcomeMessages();
     if (w.course?.places?.length) acceptCourse(w.course);
-    if (w.planningMemory?.courseId === state.course?.id) state.planningMemory = w.planningMemory;
-  }
+    if (w.conditions) state.conditions = w.conditions;
+    if (w.planningMemory && (w.planningMemory.courseId ?? null) === (state.course?.id ?? null)) state.planningMemory = w.planningMemory;
+    if (w.previousPlan?.course?.places?.length) state.previousPlan = w.previousPlan;
+    if (state.chatId && !state.course) state.view = 'chat';
+  } else state.messages = welcomeMessages();
 }
 document.addEventListener('submit', async e => {
   if (e.target.id !== 'auth-form') return; e.preventDefault();
@@ -643,6 +693,15 @@ window.matchMedia?.('(display-mode: standalone)')?.addEventListener?.('change', 
 let workspaceTimer, lastWorkspace = '', workspaceWriting = false, accountLoaded = false;
 let workspacePromise = Promise.resolve();
 const compactCourse = c => { if (!c) return null; const { recommendations, availablePlaces, ...rest } = c; return rest; };
+function chatContext() {
+  return {
+    conditions: state.conditions, course: compactCourse(state.course), planningMemory: state.planningMemory,
+    seenPlaceIds: state.seenPlaceIds,
+    messages: state.messages.map(message => ({ ...message, ...(message.course ? { course: compactCourse(message.course) } : {}) })),
+    ...(state.previousPlan?.course ? { previousPlan: { ...state.previousPlan, course: compactCourse(state.previousPlan.course) } } : {}),
+  };
+}
+const workspaceSnapshot = () => ({ ...chatContext(), chatId: state.chatId, previousChats: state.previousChats });
 function scheduleWorkspace() {
   if (!state.user || state.shared || !accountLoaded) return;
   clearTimeout(workspaceTimer);
@@ -651,7 +710,7 @@ function scheduleWorkspace() {
 async function flushWorkspace() {
   if (!state.user || state.shared || !accountLoaded) return;
   if (workspaceWriting) { try { await workspacePromise; } catch {} return flushWorkspace(); }
-  const workspace = { planningMemory: state.planningMemory, seenPlaceIds: state.seenPlaceIds, conditions: state.conditions, course: compactCourse(state.course), messages: state.messages.map(m => ({ ...m, ...(m.course ? { course: compactCourse(m.course) } : {}) })) };
+  const workspace = workspaceSnapshot();
   const value = JSON.stringify(workspace); if (value === lastWorkspace) return;
   workspaceWriting = true; const owner = state.user.id;
   try { workspacePromise = api('/api/workspace', { workspace }); await workspacePromise; if (state.user?.id === owner) lastWorkspace = value; }
@@ -659,6 +718,7 @@ async function flushWorkspace() {
   finally { workspaceWriting = false; }
 }
 async function ensurePlan() {
+  if (!state.course && state.chatId) return;
   if (!state.course) { const c = await api('/api/plan', state.conditions); acceptCourse(c); }
   if (!state.places.length && departureTimeFor(state.course)) state.places = state.course.availablePlaces || state.course.places;
   if (!state.places.length) state.places = state.course.availablePlaces || await api('/api/places?region=' + encodeURIComponent(state.conditions.region));
@@ -776,7 +836,11 @@ document.addEventListener('dragstart', e => {
 document.addEventListener('dragover', e => { const block = e.target.closest('[data-block-index]'); if (block && draggedBlock !== null) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } });
 document.addEventListener('drop', e => { const block = e.target.closest('[data-block-index]'); if (block && draggedBlock !== null) { e.preventDefault(); moveBlock(draggedBlock, Number(block.dataset.blockIndex)); draggedBlock = null; } });
 document.addEventListener('dragend', () => { draggedBlock = null; document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging')); });
-window.addEventListener('pagehide', () => { if (!state.user || state.shared || !accountLoaded || !state.course) return; const workspace = { planningMemory: state.planningMemory, seenPlaceIds: state.seenPlaceIds, conditions: state.conditions, course: compactCourse(state.course), messages: state.messages.map(m => ({ ...m, ...(m.course ? { course: compactCourse(m.course) } : {}) })) }; if (!window.EodigajiNative) navigator.sendBeacon?.('/api/workspace', new Blob([JSON.stringify({ workspace })], { type: 'application/json' })); });
+window.addEventListener('pagehide', () => {
+  if (!state.user || state.shared || !accountLoaded || window.EodigajiNative) return;
+  const workspace = workspaceSnapshot();
+  if (JSON.stringify(workspace) !== lastWorkspace) navigator.sendBeacon?.('/api/workspace', new Blob([JSON.stringify({ workspace })], { type: 'application/json' }));
+});
 let pointerBlock = null;
 document.addEventListener('pointerdown', e => { if (!e.target.closest('.drag-handle') || !state.editor) return; e.preventDefault(); pointerBlock = Number(e.target.closest('[data-block-index]').dataset.blockIndex); e.target.setPointerCapture?.(e.pointerId); });
 document.addEventListener('pointermove', e => { if (pointerBlock !== null) { e.preventDefault(); document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target')); document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-block-index]')?.classList.add('drop-target'); } }, { passive: false });
