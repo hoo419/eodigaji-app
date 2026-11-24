@@ -37,7 +37,7 @@ try {
   await page.locator('.save-float').first().click();
   assert.equal(await page.locator('.saved-grid .course-card').count(), 1);
   assert.equal(await page.locator('.saved-state').count(), 1);
-  await page.getByRole('button', { name: '블록 수정', exact: true }).click();
+  await page.getByRole('button', { name: '코스 수정', exact: true }).click();
   await page.locator('#editor-title').fill('직접 편집한 데이트 코스');
   await page.locator('[data-block-field=note]').first().fill('예약 메모: "창가 자리" <script>alert(1)</script>');
   const before = await page.locator('.block-top strong').allTextContents();
@@ -68,7 +68,7 @@ try {
   await page.locator('dialog[open] #auth-form').waitFor(); await page.locator('[name=email]').fill('browser@example.com'); await page.locator('[name=password]').fill('12345678'); await page.locator('button[form=auth-form]').click();
   await page.locator('.shell').waitFor(); await page.locator('[data-action=nav][data-tab=saved]').click();
   await page.getByRole('heading', { name: '직접 편집한 데이트 코스' }).waitFor();
-  await page.getByRole('button', { name: '블록 수정', exact: true }).click();
+  await page.getByRole('button', { name: '코스 수정', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
   await page.screenshot({ path: 'artifacts/course-editor-mobile.png', fullPage: true });
