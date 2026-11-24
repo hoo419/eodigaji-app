@@ -14,6 +14,7 @@ async function sdk(key) {
 export async function mountLiveMap(element, key, places, route, onSelect, routeDetails) {
   map = null;
   try {
+    if (!key) throw new Error('카카오 지도 연결 설정이 필요해요.');
     const maps = await sdk(key); if (!element.isConnected) return;
     const points = route.map((p,index) => ({...p, routeNumber:index+1})).filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
     const center = points[0] || { lat: 37.5445, lng: 127.0557 };
@@ -37,7 +38,8 @@ export async function mountLiveMap(element, key, places, route, onSelect, routeD
       }
       new maps.CustomOverlay({ map, position, content, xAnchor: .5, yAnchor: 1, zIndex: 10 });
     }
-    if (points.length > 1) map.setBounds(bounds, 110, 40, 110, 40);
+    const verticalPadding = Math.min(110, Math.floor(element.clientHeight / 4) || 110);
+    if (points.length > 1) map.setBounds(bounds, verticalPadding, 40, verticalPadding, 40);
     const path = route.filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng)).map(p => new maps.LatLng(p.lat, p.lng));
     if (routeDetails?.legs?.some(leg => leg.actual)) {
       for (const leg of routeDetails.legs) for (const segment of leg.segments || []) {
@@ -45,8 +47,22 @@ export async function mountLiveMap(element, key, places, route, onSelect, routeD
         line.forEach(p=>bounds.extend(p));
         if(line.length>1) new maps.Polyline({map,path:line,strokeWeight:5,strokeOpacity:.9,strokeColor:segment.mode==='WALKING'?'#23845c':segment.mode==='CAR'?'#3159df':'#8849be',strokeStyle:segment.mode==='WALKING'?'shortdash':'solid'});
       }
-      map.setBounds(bounds,125,30,100,30);
+      map.setBounds(bounds, verticalPadding, 30, verticalPadding, 30);
     } else if (path.length > 1) new maps.Polyline({ map, path, strokeWeight: 3, strokeColor: '#818b99', strokeOpacity: .6, strokeStyle: 'shortdash' });
-  } catch (e) { if (element.isConnected) { element.textContent = e.message; element.classList.add('map-live-error'); } }
+  } catch (error) {
+    if (!element.isConnected) return;
+    map = null;
+    element.classList.add('map-live-error', 'map-route-fallback');
+    element.textContent = error.message;
+    route.forEach((place, index) => {
+      if (!Number.isFinite(place.lat) || !Number.isFinite(place.lng)) return;
+      const link = document.createElement('a');
+      link.href = `https://map.kakao.com/link/map/${encodeURIComponent(place.name)},${place.lat},${place.lng}`;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = `${index + 1}. ${place.name} · 카카오맵 ↗`;
+      element.append(link);
+    });
+  }
 }
 export function zoomLiveMap(delta) { if (!map) return; map.setLevel(Math.max(1, Math.min(12, map.getLevel() + delta))); }

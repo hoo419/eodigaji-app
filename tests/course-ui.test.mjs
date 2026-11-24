@@ -6,8 +6,8 @@ import { places, recommendCourses } from '../lib/planner.mjs';
 const source = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8').replace(/^import .*;\r?\n/gm, '').replace(/init\(\);\s*$/, '');
 function harness(windowOptions = {}, navigator = {}) {
   const handlers = {};
-  const node = { addEventListener() {}, remove() {} };
-  const context = vm.createContext({ document: { querySelector: () => node, addEventListener() {} }, window: { addEventListener: (key, fn) => { handlers[key] = fn; }, matchMedia: () => ({ matches: false, addEventListener() {} }), ...windowOptions }, navigator, localStorage: { getItem: () => null }, icon: () => '' });
+  const node = { addEventListener() {}, remove() {}, close() {} };
+  const context = vm.createContext({ document: { querySelector: () => node, addEventListener: (key, fn) => { handlers[`document:${key}`] = fn; } }, window: { addEventListener: (key, fn) => { handlers[key] = fn; }, matchMedia: () => ({ matches: false, addEventListener() {} }), ...windowOptions }, navigator, localStorage: { getItem: () => null }, icon: () => '' });
   vm.runInContext(source, context);
   return { context, handlers, run: code => vm.runInContext(code, context) };
 }
@@ -17,6 +17,25 @@ test('installed native Android and iOS/PWA modes suppress install controls', () 
   assert.equal(harness({}, { standalone: true }).run('installed()'), true);
   assert.equal(harness({ matchMedia: () => ({ matches: true, addEventListener() {} }) }).run('installed()'), true);
   const h = harness(); h.handlers.appinstalled(); assert.equal(h.run('installed()'), true);
+});
+test('opening a saved card shows its itinerary and map at desktop and mobile widths', async () => {
+  for (const innerWidth of [1024, 390]) {
+    const h = harness({ innerWidth, scrollTo() {} });
+    const course = { ...recommendCourses()[0], demo: true };
+    h.context.course = course;
+    h.run('state.saved = [course]; state.tab = "saved"; render = () => {}');
+    assert.match(h.run('courseCard(course, true)'), /saved-course-card" data-action="course"/);
+    assert.match(h.run('courseCard(course, true)'), /코스 수정/);
+    await h.handlers['document:click']({
+      target: { closest: () => ({ dataset: { action: 'course', id: course.id } }) },
+    });
+    assert.equal(h.run('state.tab'), 'course');
+    assert.equal(h.run('state.editor'), null);
+    const detail = h.run('coursePage()');
+    assert.match(detail, /class="block-list"/);
+    assert.match(detail, /aria-label="선택한 코스 지도"/);
+    assert.match(detail, /class="pin-button /);
+  }
 });
 test('choosing B or C resolves its own course instead of falling back to A', () => {
   const h = harness(); const courses = recommendCourses();
