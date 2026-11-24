@@ -1,3 +1,4 @@
+import { departureTimeFor } from '../public/course-timing.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -8,7 +9,7 @@ function harness(windowOptions = {}, navigator = {}) {
   const handlers = {};
   const submitHandlers = [];
   const node = { addEventListener() {}, remove() {}, focus() {}, close() {} };
-  const context = vm.createContext({ document: { querySelector: () => node, addEventListener(key, fn) { if (key === 'submit') submitHandlers.push(fn); if (key === 'click') handlers['document:click'] = fn; } }, window: { addEventListener: (key, fn) => { handlers[key] = fn; }, matchMedia: () => ({ matches: false, addEventListener() {} }), ...windowOptions }, navigator, localStorage: { getItem: () => null }, icon: () => '' });
+  const context = vm.createContext({ departureTimeFor, document: { querySelector: () => node, addEventListener(key, fn) { if (key === 'submit') submitHandlers.push(fn); if (key === 'click') handlers['document:click'] = fn; } }, window: { addEventListener: (key, fn) => { handlers[key] = fn; }, matchMedia: () => ({ matches: false, addEventListener() {} }), ...windowOptions }, navigator, localStorage: { getItem: () => null }, icon: () => '' });
   vm.runInContext(source, context);
   return { context, handlers, submitHandlers, run: code => vm.runInContext(code, context) };
 }
