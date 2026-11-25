@@ -11,7 +11,7 @@ export function validateServerUrl(value = '') {
 export function createMobileClient({ apiBase = '', request } = {}) {
   const base = validateServerUrl(apiBase);
   return async (path, body) => {
-    if (!/^\/api\/[a-z/?=&_-]+$/.test(path)) throw new Error('지원하지 않는 API 경로입니다.');
+    if (!/^\/api\/[a-z0-9/?=&_-]+$/.test(path)) throw new Error('지원하지 않는 API 경로입니다.');
     // 서버 연결 실패를 샘플 성공으로 바꾸지 않고 오류를 그대로 화면에 알립니다.
     if (base) {
       let response;
@@ -26,7 +26,7 @@ export function createMobileClient({ apiBase = '', request } = {}) {
     if (path === '/api/health') return { status: 'ok', mode: 'offline-demo' };
     if (path === '/api/places') return places;
     if (path === '/api/auth/user') return { user: null };
-    if (path === '/api/plan') { const recommendations = recommendCourses(body || {}); return { ...recommendations[0], recommendations }; }
+    if (path === '/api/plan') { const recommendations = recommendCourses(body || {}, undefined, { single: true }); return { ...recommendations[0], recommendations }; }
     if (path === '/api/chat') {
       if (typeof body?.message !== 'string' || !body.message.trim() || body.message.length > 1500) throw new Error('메시지는 1~1500자로 입력해 주세요.');
       const parsed = parseMessage(body.message, body.conditions || {});

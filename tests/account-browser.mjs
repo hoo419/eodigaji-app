@@ -50,13 +50,19 @@ try {
   await page.getByRole('button', { name: '변경사항 저장', exact: true }).click();
   await page.locator('.course-detail-grid').waitFor();
   assert.ok(await page.locator('.block-list').innerText().then(s => s.includes('자동차 이동 · 약 25분')));
+  await page.evaluate(() => {
+    navigator.clipboard.writeText = async () => { throw new DOMException('Clipboard denied', 'NotAllowedError'); };
+  });
   await page.getByRole('button', { name: 'URL 복사', exact: true }).click();
+  await page.getByText('자동 복사가 차단됐어요.', { exact: false }).waitFor();
+  await page.evaluate(() => { delete navigator.clipboard.writeText; });
+  await page.getByRole('button', { name: '링크 복사', exact: true }).click();
   await page.getByText('공유 링크를 복사했어요.').waitFor();
   const shareUrl = await page.evaluate(() => navigator.clipboard.readText());
   const shareId = new URL(shareUrl).searchParams.get('share'); assert.ok(shareId);
   const anonymous = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await anonymous.route(/https:\/\/(?!127\.0\.0\.1)/, route => route.abort());
-  const shared = await anonymous.newPage(); await shared.goto(base + '/?share=' + shareId);
+  const shared = await anonymous.newPage(); await shared.goto(shareUrl);
   await shared.getByText('공유 시점에 저장된 코스', { exact: true }).waitFor();
   assert.equal(await shared.locator('[data-action=edit-course],[data-action=save-edit],[data-action=share]').count(), 0);
   assert.equal(await shared.locator('.course-block').count(), course.places.length);
@@ -64,6 +70,7 @@ try {
   assert.equal(await shared.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
   await shared.screenshot({ path: 'artifacts/shared-course-mobile.png', fullPage: true });
   await shared.locator('[data-action=home]').last().click(); await shared.locator('.login-gate').waitFor();
+  await page.locator('dialog [data-action=close]').click();
   await page.locator('[data-action=logout]').first().click(); await page.locator('.login-gate').waitFor();
   await page.locator('dialog[open] #auth-form').waitFor(); await page.locator('[name=email]').fill('browser@example.com'); await page.locator('[name=password]').fill('12345678'); await page.locator('button[form=auth-form]').click();
   await page.locator('.shell').waitFor(); await page.locator('[data-action=nav][data-tab=saved]').click();

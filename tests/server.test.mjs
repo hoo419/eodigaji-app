@@ -15,6 +15,7 @@ test('real HTTP API validates requests and serves plans without exposing private
   const result = await fetch(url + '/api/plan', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ region: '성수', budget: 30000, environment: '실내' }) });
   assert.equal(result.status, 200);
   const p = await result.json(); assert.ok(p.totalCost <= 30000); assert.equal(p.demo, true);
+  assert.deepEqual(p.recommendations.map(course => course.id), [p.id]);
   const noMatch = await fetch(url + '/api/plan', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ region: '성수', budget: 0, duration: 60 }) });
   assert.equal(noMatch.status, 400);
   assert.equal((await noMatch.json()).code, 'NO_MATCHING_COURSE');

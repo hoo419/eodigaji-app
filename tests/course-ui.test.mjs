@@ -78,11 +78,11 @@ test('opening a saved card shows its itinerary and map at desktop and mobile wid
     assert.match(detail, /class="pin-button /);
   }
 });
-test('choosing B or C resolves its own course instead of falling back to A', () => {
+test('only the current recommendation is selectable from a legacy multi-course response', () => {
   const h = harness(); const courses = recommendCourses();
   h.context.courses = courses;
   h.run('acceptCourse({...courses[0],recommendations:courses})');
-  courses.forEach(c => { h.context.targetId = c.id; assert.equal(h.run('lookupCourse(targetId).id'), c.id); });
+  assert.deepEqual(Array.from(h.run('state.recommendations.map(course => course.id)')), [courses[0].id]);
 });
 test('sample map renders only selected route stops even when extra places are loaded', () => {
   const h = harness(); h.context.course = recommendCourses()[0]; h.context.catalogue = places;
@@ -96,6 +96,7 @@ test('recommendation display does not contain the old additional place list', ()
   const h = harness(); h.context.courses = recommendCourses();
   h.run('acceptCourse({...courses[0],recommendations:courses})');
   const html = h.run('discovery()');
-  assert.equal((html.match(/data-action="choose-course"/g) || []).length, h.context.courses.length);
+  assert.equal((html.match(/data-action="choose-course"/g) || []).length, 1);
+  assert.doesNotMatch(html, /[ABC] 코스/);
   assert.ok(!html.includes('함께 들르기 좋은 곳'));
 });

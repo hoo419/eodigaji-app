@@ -109,7 +109,7 @@ function refreshLiveMap() {
     mountLiveMap(target, state.config.map ? state.config.mapKey : '', stops, stops, id => placeDialog(id), state.routeDetails);
   }
 }
-function acceptCourse(course) { if (state.planningMemory.courseId !== course.id) { state.planningMemory = { courseId: course.id, lockedPlaceIds: [], preferences: state.planningMemory.preferences || [], excludedPlaceIds: [] }; state.previousPlan = null; } if (!state.shared) state.seenPlaceIds = [...new Set([...state.seenPlaceIds, ...(course.recommendations || [course]).flatMap(c => c.places.map(p => p.id))])].slice(-120); state.routeMode = null; state.routeDetails = null; state.routeBusy = false; state.courseChosen = false; state.mapExpanded = false; state.recommendations = course.recommendations || [course]; state.course = course; state.conditions = course.conditions; if (course.availablePlaces) state.places = course.availablePlaces; }
+function acceptCourse(course) { if (state.planningMemory.courseId !== course.id) { state.planningMemory = { courseId: course.id, lockedPlaceIds: [], preferences: state.planningMemory.preferences || [], excludedPlaceIds: [] }; state.previousPlan = null; } if (!state.shared) state.seenPlaceIds = [...new Set([...state.seenPlaceIds, ...course.places.map(p => p.id)])].slice(-120); state.routeMode = null; state.routeDetails = null; state.routeBusy = false; state.courseChosen = false; state.mapExpanded = false; state.recommendations = [course]; state.course = course; state.conditions = course.conditions; if (course.availablePlaces) state.places = course.availablePlaces; }
 function greeting(title, sub, eyebrow = 'MAKE ROOM FOR A LITTLE ADVENTURE') { return `<section class="greeting"><div><span class="eyebrow">${eyebrow}</span><h1>${title}</h1><p>${sub}</p></div><span class="date">${icon('calendar')}${esc(today.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' }))}</span></section>`; }
 function explore() {
   const c = state.conditions;
@@ -128,7 +128,7 @@ function courseCard(course, saved = false) {
 }
 function discovery() {
   const courses = state.recommendations.length ? state.recommendations : state.course ? [state.course] : [];
-  return '<section class="discovery"><div class="section-title"><h2>어떤 하루가 끌리세요?</h2><div class="row">' + btn('refresh-courses', state.busy ? '새 코스를 찾는 중…' : '다른 코스 추천', '', 'outline', state.busy ? 'disabled' : '') + '</div></div><div class="recommendations">' + courses.map((course, i) => '<article class="recommendation"><div class="recommendation-photo">' + photo(course.places.find(p => p.category === (course.concept === '공원 데이트' ? '산책' : course.concept === '문화 데이트' ? '문화' : '카페')) || course.places[0]) + '</div><div class="recommendation-body"><span class="tag blue">' + esc(course.label || String.fromCharCode(65 + i)) + ' 코스</span><h3>' + esc(course.concept || course.title) + '</h3>' + (course.environmentLabel ? '<small>' + esc(course.environmentLabel) + '</small>' : '') + '<p>' + course.places.map(p => esc(p.name)).join(' → ') + '</p><div class="course-stats"><span>' + length(course.minutes) + '</span><span>1인 예상 ' + won(course.totalCost) + '</span></div>' + btn('choose-course', '이 코스 선택', 'arrow', 'primary full', 'data-id="' + esc(course.id) + '"') + '</div></article>').join('') + '</div><button class="ai-invite" data-action="view" data-view="chat">' + icon('spark') + '<div><strong>다른 하루를 원하시나요?</strong><p>AI에게 취향을 알려 주세요.</p></div></button></section>';
+  return '<section class="discovery"><div class="section-title"><h2>추천 코스</h2><div class="row">' + btn('refresh-courses', state.busy ? '새 코스를 찾는 중…' : '다른 코스 추천', '', 'outline', state.busy ? 'disabled' : '') + '</div></div><div class="recommendations">' + courses.map(course => '<article class="recommendation"><div class="recommendation-photo">' + photo(course.places.find(p => p.category === (course.concept === '공원 데이트' ? '산책' : course.concept === '문화 데이트' ? '문화' : '카페')) || course.places[0]) + '</div><div class="recommendation-body"><h3>' + esc(course.concept || course.title) + '</h3>' + (course.environmentLabel ? '<small>' + esc(course.environmentLabel) + '</small>' : '') + '<p>' + course.places.map(p => esc(p.name)).join(' → ') + '</p><div class="course-stats"><span>' + length(course.minutes) + '</span><span>1인 예상 ' + won(course.totalCost) + '</span></div>' + btn('choose-course', '이 코스 선택', 'arrow', 'primary full', 'data-id="' + esc(course.id) + '"') + '</div></article>').join('') + '</div><button class="ai-invite" data-action="view" data-view="chat">' + icon('spark') + '<div><strong>다른 하루를 원하시나요?</strong><p>AI에게 취향을 알려 주세요.</p></div></button></section>';
 }
 function routeLinks(a, b) {
   if (![a.lat,a.lng,b.lat,b.lng].every(Number.isFinite)) return '<span class="small muted">샘플 장소 · 실제 길찾기 없음</span>';
@@ -167,14 +167,14 @@ function coursePage() {
   const course = state.course;
   if (state.shared) return sharedPage(course);
   if (!course) { state.tab = 'explore'; return explore(); }
-  return greeting(esc(course.concept || course.title), '선택한 장소와 방문 순서를 한눈에 확인하세요.', 'OUR DATE ROUTE') + '<div class="detail-actions">' + btn('edit-with-ai', '대화로 코스 수정', 'spark', 'primary') + btn('other-courses', '다른 코스 선택', 'back', 'outline') + btn('refresh-courses', '다른 코스 추천', '', 'outline', state.busy ? 'disabled' : '') + btn('save', hasSavedChanges(course) ? '변경사항 저장' : isSaved(course) ? '♥ 저장됨' : '코스 저장', 'heart', 'primary', 'data-id="' + esc(course.id) + '"') + btn('share', 'URL 복사', 'share', 'outline', 'data-id="' + esc(course.id) + '"') + (isSaved(course) ? btn('edit-course', '코스 수정', '', 'outline', 'data-id="' + esc(course.id) + '"') : '') + '</div><div class="course-detail-grid"><section class="route-detail"><div class="detail-summary"><span>추천 일정 추정 (' + esc(course.conditions.transport) + ') ' + length(course.minutes) + '</span><span>1인 예상 ' + won(course.totalCost) + '</span><span>' + esc(course.conditions.start) + '–' + esc(course.end) + '</span>' + groupSummary(course) + '</div><div class="block-list">' + blocks(course) + '</div></section>' + mapPanel() + '</div><p class="sample-foot">예상 일정 · 실제 길찾기와 영업 여부는 방문 전에 확인하세요.</p>';
+  return greeting(esc(course.concept || course.title), '선택한 장소와 방문 순서를 한눈에 확인하세요.', 'OUR DATE ROUTE') + '<div class="detail-actions">' + btn('edit-with-ai', '대화로 코스 수정', 'spark', 'primary') + btn('other-courses', '추천 화면으로', 'back', 'outline') + btn('refresh-courses', '다른 코스 추천', '', 'outline', state.busy ? 'disabled' : '') + btn('save', hasSavedChanges(course) ? '변경사항 저장' : isSaved(course) ? '♥ 저장됨' : '코스 저장', 'heart', 'primary', 'data-id="' + esc(course.id) + '"') + btn('share', 'URL 복사', 'share', 'outline', 'data-id="' + esc(course.id) + '"') + (isSaved(course) ? btn('edit-course', '코스 수정', '', 'outline', 'data-id="' + esc(course.id) + '"') : '') + '</div><div class="course-detail-grid"><section class="route-detail"><div class="detail-summary"><span>추천 일정 추정 (' + esc(course.conditions.transport) + ') ' + length(course.minutes) + '</span><span>1인 예상 ' + won(course.totalCost) + '</span><span>' + esc(course.conditions.start) + '–' + esc(course.end) + '</span>' + groupSummary(course) + '</div><div class="block-list">' + blocks(course) + '</div></section>' + mapPanel() + '</div><p class="sample-foot">예상 일정 · 실제 길찾기와 영업 여부는 방문 전에 확인하세요.</p>';
 }
 function miniPlace(p) { return `<button class="mini-place" data-action="place" data-id="${esc(p.id)}"><span class="thumb">${photo(p)}</span><span><small>${esc(p.category)} · ${esc(p.region)}</small><h3>${esc(p.name)}</h3><p>${esc(p.environment)} · ${p.estimated ? '예상 ' : ''}${won(p.cost)}</p></span>${icon('chevron')}</button>`; }
 function filteredPlaces() { return state.places.filter(p => p.region === state.conditions.region && (state.filter === '전체' || p.category === state.filter) && `${p.name} ${p.category} ${p.description} ${p.region}`.includes(state.query)); }
 function mapPanel() {
   const mode = state.routeMode || state.conditions.transport;
   const routeStatus = state.routeBusy ? '실제 경로 조회 중' : state.routeDetails?.actual ? '카카오 실제 경로' : '방문 순서 · 실제 경로 미조회';
-  return '<section class="map-panel ' + (state.mapExpanded ? 'map-expanded' : '') + '" aria-label="선택한 코스 지도"><div class="map-title"><strong>' + (state.courseChosen ? esc(mode) + ' · ' + routeStatus : '코스를 선택해 주세요') + '</strong>' + btn('expand-map', state.mapExpanded ? '지도 작게 보기' : '지도 크게 보기', 'map', 'outline') + '</div><div class="route-mode-controls">' + (state.courseChosen ? ['도보','대중교통','자동차'].map(label => btn('route-mode', label, '', mode === label ? 'primary' : 'outline', 'data-mode="' + label + '" aria-pressed="' + (mode === label) + '"')).join('') : '') + '</div><div id="map-render">' + (state.courseChosen ? mapArt() : '<div class="map-live-error">A·B·C 코스 중 원하는 하루를 고르면<br>그 코스의 장소와 순서만 표시합니다.</div>') + '</div><div class="map-controls">' + actionIcon('zoom-in','plus','지도 확대') + actionIcon('zoom-out','minus','지도 축소') + '</div><div class="map-legend"><div><strong>' + (state.courseChosen ? esc(state.conditions.region) + ' · ' + state.course.places.length + '곳' : '우리의 하루를 먼저 골라보세요') + '</strong><p>' + (state.routeDetails?.actual ? esc(mode) + ' 경로 · 도보 녹색 / 대중교통 보라색 / 자동차 파란색' : '회색 점선은 방문 순서 · 실제 경로가 아닙니다') + '</p></div></div></section>';
+  return '<section class="map-panel ' + (state.mapExpanded ? 'map-expanded' : '') + '" aria-label="선택한 코스 지도"><div class="map-title"><strong>' + (state.courseChosen ? esc(mode) + ' · ' + routeStatus : '코스를 선택해 주세요') + '</strong>' + btn('expand-map', state.mapExpanded ? '지도 작게 보기' : '지도 크게 보기', 'map', 'outline') + '</div><div class="route-mode-controls">' + (state.courseChosen ? ['도보','대중교통','자동차'].map(label => btn('route-mode', label, '', mode === label ? 'primary' : 'outline', 'data-mode="' + label + '" aria-pressed="' + (mode === label) + '"')).join('') : '') + '</div><div id="map-render">' + (state.courseChosen ? mapArt() : '<div class="map-live-error">추천 코스를 선택하면<br>방문 장소와 순서를 지도에 표시해요.</div>') + '</div><div class="map-controls">' + actionIcon('zoom-in','plus','지도 확대') + actionIcon('zoom-out','minus','지도 축소') + '</div><div class="map-legend"><div><strong>' + (state.courseChosen ? esc(state.conditions.region) + ' · ' + state.course.places.length + '곳' : '방문 장소') + '</strong><p>' + (state.routeDetails?.actual ? esc(mode) + ' 경로 · 도보 녹색 / 대중교통 보라색 / 자동차 파란색' : '회색 점선은 방문 순서 · 실제 경로가 아닙니다') + '</p></div></div></section>';
 }
 function mapArt() {
   if (state.course && !state.course.demo) return '<div id="real-map" class="real-map" aria-label="카카오 지도"></div>';
@@ -476,18 +476,37 @@ async function refreshRecommendations() {
   }
   finally { state.busy = false; render(); }
 }
-async function share(course) {
-  if (!state.user || state.shared) return;
+async function copyShareLink() {
+  const field = dialog.querySelector('.share-text');
+  const status = dialog.querySelector('#share-copy-status');
+  if (!field || !status) return;
   try {
-    if (!isSaved(course) || state.saved.some(c => c.id === course.id && (c.revision || 0) !== (course.revision || 0))) {
+    await navigator.clipboard.writeText(field.value);
+    status.textContent = '공유 링크를 복사했어요.';
+  } catch {
+    if (!dialog.open || !field.isConnected) return;
+    field.focus();
+    field.select();
+    status.textContent = '자동 복사가 차단됐어요. 링크 복사 버튼을 다시 누르거나 선택된 주소를 직접 복사해 주세요.';
+  }
+}
+async function share(course, button) {
+  if (!course || !state.user || state.shared) return;
+  const generation = accountGeneration;
+  button.disabled = true;
+  try {
+    if (!isSaved(course) || hasSavedChanges(course)) {
       const { availablePlaces, recommendations, ...compact } = course;
-      await api('/api/saved', { course: compact }); state.saved = [compact, ...state.saved.filter(c => c.id !== compact.id)];
+      await api('/api/saved', { course: compact });
+      if (generation !== accountGeneration) return;
+      state.saved = [compact, ...state.saved.filter(c => c.id !== compact.id)];
     }
     const { url } = await api('/api/shares', { courseId: course.id });
-    try { await navigator.clipboard.writeText(url); toast('공유 링크를 복사했어요.'); } catch {}
-    openDialog('코스 공유', `<p>링크를 받은 사람은 로그인 없이 가능한 시간과 메모를 남길 수 있어요.</p><textarea class="share-text" readonly aria-label="공유할 코스 링크">${esc(url)}</textarea>`, `<a class="btn outline" href="${esc(url)}" target="_blank" rel="noopener noreferrer">공유 코스 열기</a>${btn('close', '닫기', '', 'primary')}`);
-    $('.share-text')?.select();
-  } catch (e) { toast(e.message); }
+    if (generation !== accountGeneration) return;
+    openDialog('코스 공유', `<p>링크를 받은 사람은 로그인 없이 코스를 보고 가능한 시간과 메모를 남길 수 있어요.</p><textarea class="share-text" readonly aria-label="공유할 코스 링크">${esc(url)}</textarea><p id="share-copy-status" role="status"></p>`, `<a class="btn outline" href="${esc(url)}" target="_blank" rel="noopener noreferrer">공유 코스 열기</a>${btn('copy-share-link', '링크 복사', '', 'primary')}`);
+    await copyShareLink();
+  } catch (e) { if (generation === accountGeneration) toast(e.message); }
+  finally { button.disabled = false; }
 }
 // 이벤트 위임: 화면을 다시 그려도 data-action 속성으로 버튼 동작을 한 곳에서 처리합니다.
 document.addEventListener('click', async e => {
@@ -536,7 +555,8 @@ document.addEventListener('click', async e => {
   if (action === 'back-course') { closeDialog(); state.tab = 'course'; render(); }
   if (action === 'save' || action === 'save-detail') { const c = lookupCourse(id); target.disabled = true; await toggleSave(c); target.disabled = false; if (action === 'save-detail') courseDialog(c); }
   if (action === 'remove-saved') await toggleSave(lookupCourse(id), true);
-  if (action === 'share') await share(lookupCourse(id));
+  if (action === 'share') await share(lookupCourse(id), target);
+  if (action === 'copy-share-link') await copyShareLink();
   if (action === 'use-course' || action === 'chat-course') { const c = lookupCourse(id, target.dataset.revision); acceptCourse(c); state.courseChosen = true; if (!c.demo && !c.availablePlaces) state.places = c.places; state.view = 'map'; state.tab = 'course'; state.query = ''; state.filter = '전체'; closeDialog(); render(); window.scrollTo(0, 0); }
   if (action === 'suggest') await sendChat(target.dataset.message);
   if (action === 'place-chat') { const p = state.places.find(p => p.id === id); closeDialog(); await sendChat(`${p.region}에서 ${p.environment}, ${p.mood === '여유로운' ? '조용한' : p.mood} ${state.conditions.purpose}`); }

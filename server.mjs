@@ -62,7 +62,7 @@ export function createApp({ env = process.env, connections = createConnections(e
       catalogue = catalogue.map(place => ({ ...place, region: conditions.region }));
     }
     let recommendations;
-    try { recommendations = recommendCourses(conditions, catalogue, { excludePlaceIds, origin }); }
+    try { recommendations = recommendCourses(conditions, catalogue, { excludePlaceIds, origin, single: true }); }
     catch (e) {
       if (e.code === 'NO_MATCHING_COURSE' && excludePlaceIds.length) e.message = '이전 장소를 제외하면 조건에 맞는 새 코스가 부족해요. 지역·예산·종류 조건을 바꿔 주세요.';
       throw e;

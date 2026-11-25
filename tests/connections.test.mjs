@@ -93,6 +93,16 @@ test('signup explicitly returns email confirmations to the configured app origin
   assert.equal(observed.searchParams.get('redirect_to'), 'http://127.0.0.1:4173/');
 });
 
+test('share snapshots are inserted without requesting update permissions', async () => {
+  const api = createConnections({ SUPABASE_URL: 'https://example.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'public-key' }, async (url, options) => {
+    assert.equal(new URL(url).pathname, '/rest/v1/shared_courses');
+    assert.equal(options.method, 'POST');
+    if (options.headers.Prefer.includes('merge-duplicates')) return new Response('{}', { status: 403 });
+    return new Response('[]', { status: 201 });
+  });
+  await api.database('shared_courses', 'POST', 'user-token', '', { id: 'share-id', user_id: 'owner', data: {} });
+});
+
 test('Gemini retries temporary 503 errors and returns validated conditions', async () => {
   let attempts = 0;
   const api = createConnections({ AI_PROVIDER: 'gemini', GEMINI_API_KEY: 'secret' }, async () => {
