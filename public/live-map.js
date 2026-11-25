@@ -48,7 +48,13 @@ export async function mountLiveMap(element, key, places, route, onSelect, routeD
         if(line.length>1) new maps.Polyline({map,path:line,strokeWeight:5,strokeOpacity:.9,strokeColor:segment.mode==='WALKING'?'#23845c':segment.mode==='CAR'?'#3159df':'#8849be',strokeStyle:segment.mode==='WALKING'?'shortdash':'solid'});
       }
       map.setBounds(bounds, verticalPadding, 30, verticalPadding, 30);
-    } else if (path.length > 1) new maps.Polyline({ map, path, strokeWeight: 3, strokeColor: '#818b99', strokeOpacity: .6, strokeStyle: 'shortdash' });
+    } else if (path.length > 1) {
+      const paths = path.length === route.length ? [path] : points.slice(1).flatMap((point, i) => {
+        const from = points[i];
+        return point.routeNumber === from.routeNumber + 1 ? [[new maps.LatLng(from.lat, from.lng), new maps.LatLng(point.lat, point.lng)]] : [];
+      });
+      for (const line of paths) new maps.Polyline({ map, path: line, strokeWeight: 3, strokeColor: '#818b99', strokeOpacity: .6, strokeStyle: 'shortdash' });
+    }
   } catch (error) {
     if (!element.isConnected) return;
     map = null;

@@ -135,6 +135,7 @@ function discovery() {
   return '<section class="discovery"><div class="section-title"><h2>추천 코스</h2><div class="row">' + btn('refresh-courses', state.busy ? '새 코스를 찾는 중…' : '다른 코스 추천', '', 'outline', state.busy ? 'disabled' : '') + '</div></div><div class="recommendations">' + courses.map(course => '<article class="recommendation"><div class="recommendation-photo">' + photo(course.places.find(p => p.category === (course.concept === '공원 데이트' ? '산책' : course.concept === '문화 데이트' ? '문화' : '카페')) || course.places[0]) + '</div><div class="recommendation-body"><h3>' + esc(course.concept || course.title) + '</h3>' + (course.environmentLabel ? '<small>' + esc(course.environmentLabel) + '</small>' : '') + '<p>' + course.places.map(p => esc(p.name)).join(' → ') + '</p><div class="course-stats"><span>' + length(course.minutes) + '</span><span>1인 예상 ' + won(course.totalCost) + '</span></div>' + btn('choose-course', '이 코스 선택', 'arrow', 'primary full', 'data-id="' + esc(course.id) + '"') + '</div></article>').join('') + '</div><button class="ai-invite" data-action="view" data-view="chat">' + icon('spark') + '<div><strong>다른 하루를 원하시나요?</strong><p>AI에게 취향을 알려 주세요.</p></div></button></section>';
 }
 function routeLinks(a, b) {
+  if (a.manual || b.manual) return '<span class="small muted">직접 입력한 장소가 포함된 구간 · 이동시간 직접 입력</span>';
   if (![a.lat,a.lng,b.lat,b.lng].every(Number.isFinite)) return '<span class="small muted">샘플 장소 · 실제 길찾기 없음</span>';
   const point = p => encodeURIComponent(p.name) + ',' + p.lat + ',' + p.lng;
   return '<div class="route-links">' + [['도보','walk'],['대중교통','traffic'],['자동차','car']].map(([label,mode]) => '<a class="route-link ' + (state.routeMode === label ? 'active' : '') + '" href="https://map.kakao.com/link/by/' + mode + '/' + point(a) + '/' + point(b) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + ' 실제 길찾기 ↗</a>').join('') + '</div>';
@@ -147,12 +148,14 @@ function routeLegDetails(course,i) {
 }
 async function loadCourseRoute(mode) {
   const course=state.course; if (!course) return;
-  state.routeMode=mode; state.routeDetails=null; state.routeBusy=!course.demo; render();
-  if (course.demo) return;
+  const canRoute = !course.demo && !course.places.some(p => p.manual);
+  state.routeMode=mode; state.routeDetails=null; state.routeBusy=canRoute; render();
+  if (!canRoute) return;
   try {
     const result=await api('/api/route',{mode,points:course.places.map(p=>({name:p.name,lat:p.lat,lng:p.lng}))});
     if(state.course===course && state.routeMode===mode) {
       state.routeDetails=result;
+      if (course.timingMode === 'fixed') return;
       course.conditions.transport = mode;
       course.places.forEach(p => { p.transport = mode; });
       result.legs.forEach((leg,i) => { if (leg.actual) Object.assign(course.places[i+1], {travel:leg.minutes,travelDistance:leg.distance,travelActual:true,travelBasis:'카카오 길찾기 조회 결과'}); });
@@ -187,8 +190,8 @@ function mapArt() {
     blocks += `<rect x="${x}" y="${y}" width="83" height="75" rx="6" fill="${(row + col) % 3 === 0 ? '#e2e6e0' : '#e8ebe5'}" stroke="#dce2da" stroke-width="1"/><path d="M${x + 40} ${y}v75M${x} ${y + 37}h83" stroke="#f3f4ef" stroke-width="5"/>`;
   }
   const course = state.course?.places || [];
-  const line = course.map((p, i) => `${i ? 'L' : 'M'} ${p.x * 10} ${p.y * 8}`).join(' ');
-  const visible = course;
+  const visible = course.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
+  const line = course.map((p, i) => visible.includes(p) ? `${visible.includes(course[i-1]) ? 'L' : 'M'} ${p.x * 10} ${p.y * 8}` : '').join(' ');
   return `<div class="map-art" style="transform:scale(${state.zoom})"><svg class="base-map" viewBox="0 0 1000 800" preserveAspectRatio="none" aria-hidden="true"><rect width="1000" height="800" fill="#f1f2ec"/><g transform="rotate(-13 500 400)">${blocks}<path d="M-100 312H1100M360-100V900" stroke="#d6dbd2" stroke-width="30"/><path d="M-100 312H1100M360-100V900" stroke="#fffefa" stroke-width="25"/><path d="M-100 600H1100M790-100V900" stroke="#fffefa" stroke-width="21"/><path d="M-100 314H1100" stroke="#d2c9b1" stroke-width="2" stroke-dasharray="9 8"/></g><path d="M-20 460Q135 460 164 550T370 830H-20Z" fill="#d4e1cb"/><path d="M-30 590Q90 480 150 650T325 830" fill="none" stroke="#eaf0df" stroke-width="14"/><path d="M670 800Q730 655 1030 625V830Z" fill="#cce2e7"/><path d="M650 800Q724 635 1030 607" fill="none" stroke="#e5edd9" stroke-width="24"/><text x="490" y="165" font-size="22" fill="#939e91" font-family="sans-serif" letter-spacing="6">${esc(state.conditions.region)}동</text><text x="70" y="655" font-size="15" fill="#8da480" font-family="sans-serif">동네 공원</text><text x="820" y="740" font-size="14" fill="#87a8b1" font-family="sans-serif">물빛 산책로</text><text x="390" y="620" font-size="12" fill="#a2aa9e" font-family="sans-serif" transform="rotate(-13 390 620)">연무장길 · 예시</text><path d="${line}" fill="none" stroke="#fff" stroke-width="9" stroke-linejoin="round"/><path d="${line}" fill="none" stroke="#476ce2" stroke-width="4" stroke-linecap="round" stroke-dasharray="5 8" stroke-linejoin="round"/></svg>
     ${visible.map(p => { const idx = course.findIndex(x => x.id === p.id); return `<button class="pin-button ${state.selected === p.id ? 'selected' : ''} ${idx === -1 ? 'alternative' : ''}" data-action="place" data-id="${p.id}" style="left:${p.x}%;top:${p.y}%" aria-label="${esc(p.name)} 장소 상세">${idx > -1 ? `<b>${idx + 1}</b>${esc(p.name)}` : icon(p.category === '카페' ? 'coffee' : 'pin')}</button>`; }).join('')}</div>${!visible.length ? '<div class="map-empty">검색 결과가 없어요. 검색어나 분류를 바꿔 주세요.</div>' : ''}`;
 }
@@ -356,7 +359,12 @@ function courseDialog(course) {
   }
 }
 function placeDialog(id, fromCourse = false) {
-  const p = state.places.find(p => p.id === id) || draftCourse?.places.find(p => p.id === id); if (!p) return;
+  const p = state.course?.places.find(p => p.id === id) || state.places.find(p => p.id === id) || draftCourse?.places.find(p => p.id === id); if (!p) return;
+  if (p.manual) {
+    const query = encodeURIComponent([p.address, p.name].filter(Boolean).join(' '));
+    openDialog('직접 추가한 장소', `<h3 class="detail-title">${esc(p.name)}</h3><p>${esc(p.address || '주소 미입력')} · ${esc(p.category)}</p><p>체류 ${p.stay}분 · 1인 예상 ${won(p.cost)}</p>${p.note ? `<p>${esc(p.note)}</p>` : ''}`, `<a class="btn outline" href="https://map.kakao.com/link/search/${query}" target="_blank" rel="noopener noreferrer">카카오맵에서 검색</a>`);
+    return;
+  }
   state.selected = id;
   const map = $('#map-render'); if (map) map.innerHTML = mapArt();
   refreshLiveMap();
@@ -547,9 +555,10 @@ document.addEventListener('click', async e => {
   if (action === 'edit-course') { const c = state.saved.find(c => c.id === id); if (c) { state.editor = structuredClone(c); state.tab = 'course'; render(); } return; }
   if (action === 'cancel-edit') { state.editor = null; render(); return; }
   if (action === 'save-edit') { await saveEditor(); return; }
+  if (action === 'manual-place') { manualPlaceDialog(target.dataset.index); return; }
   if (action === 'block-up' || action === 'block-down') { moveBlock(Number(target.dataset.index), Number(target.dataset.index) + (action === 'block-up' ? -1 : 1)); return; }
   if (action === 'block-remove') { if (state.editor.places.length <= 2) return toast('코스에는 장소가 2개 이상 필요해요.'); state.editor.places.splice(Number(target.dataset.index), 1); render(); return; }
-  if (action === 'block-add') { const p = state.places.find(p => p.id === $('#editor-place').value); if (p && state.editor.places.length < Math.floor(state.editor.conditions.duration / 5)) { state.editor.places.push({ ...structuredClone(p), travel: 10 }); render(); } return; }
+  if (action === 'block-add') { const p = state.places.find(p => p.id === $('#editor-place').value); if (p && state.editor.places.length < editorPlaceLimit(state.editor)) { state.editor.places.push({ ...structuredClone(p), travel: 10 }); render(); } return; }
   if (action === 'close') closeDialog();
   if (action === 'nav') { state.editor = null; state.tab = target.dataset.tab; render(); window.scrollTo(0, 0); }
   if (action === 'view') { state.view = target.dataset.view; if (state.view === 'chat' && state.course) state.courseChosen = true; state.tab = 'explore'; render(); }
@@ -604,6 +613,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && state.mapE
 document.addEventListener('submit', async e => {
   e.preventDefault();
   if (e.target.id === 'chat-form') return sendChat(new FormData(e.target).get('message'));
+  if (e.target.id === 'manual-place-form') return applyManualPlace(e.target);
   if (e.target.id === 'availability-form' && state.shared && state.shareId) return loadAvailability(e.target);
   if (e.target.id === 'calendar-date-form') {
     const course = state.shared ? state.course : state.saved.find(item => item.id === e.target.dataset.id);
@@ -764,7 +774,7 @@ function blocks(course, editable = false) {
   const firstLeg = departure ? `<div class="transport-block">출발 → 첫 장소 · ${esc(course.departureTransport)} 약 ${departure}분 (거리 기반 추정)</div>` : '';
   return firstLeg + course.places.map((p, i) => `<article class="course-block" ${editable ? `draggable="true" data-block-index="${i}"` : ''}>
     <div class="block-top"><span class="block-index">${i + 1}</span><strong>${esc(p.time || '')} · ${!editable && !state.shared ? `<button class="block-place-link" data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button>` : esc(p.name)}</strong>${editable ? `<span class="block-controls"><span class="drag-handle" title="드래그해서 순서 변경">⠿</span>${btn('block-up', '↑', '', 'outline', `data-index="${i}" aria-label="${i+1}번 장소 위로" ${i === 0 ? 'disabled' : ''}`)}${btn('block-down', '↓', '', 'outline', `data-index="${i}" aria-label="${i+1}번 장소 아래로" ${i === course.places.length-1 ? 'disabled' : ''}`)}${btn('block-remove', '삭제', '', 'ghost', `data-index="${i}"`)}</span>` : ''}</div>
-    <div class="block-body"><figure>${photo(p)}<figcaption>${p.photoUrl ? '장소 제공 사진 · 로딩 실패 시 예시 이미지' : '예시 이미지 · 실제 장소 사진 아님'}</figcaption></figure><div><p>${esc(p.category)} · ${esc(p.address || p.region)}</p>${editable ? `<div class="form-grid"><label class="field">체류 시간 (분)<input type="number" min="5" max="${stayLimit(p)}" data-block-field="stay" data-index="${i}" value="${Number(p.stay) || 40}"></label><label class="field">예상 비용 (원)<input type="number" min="0" max="1000000" data-block-field="cost" data-index="${i}" value="${Number(p.cost) || 0}"></label></div><label class="field">메모<textarea maxlength="1000" data-block-field="note" data-index="${i}" placeholder="예약 시간, 하고 싶은 일 등">${esc(p.note || '')}</textarea></label>` : `<p>체류 ${Number(p.stay) || 0}분 · 1인 예상 ${won(p.cost)}</p>${p.note ? `<p class="block-note">${esc(p.note)}</p>` : ''}`}</div></div></article>${i < course.places.length - 1 ? `<div class="transport-block">↓ ${editable ? `<select aria-label="${i+1}번 구간 이동수단" data-block-field="transport" data-index="${i}">${['도보','자동차','대중교통'].map(m => `<option ${m === (p.transport || course.conditions.transport) ? 'selected' : ''}>${m}</option>`).join('')}</select><label>예상 <input aria-label="${i+1}번 구간 이동 시간" type="number" min="0" max="600" value="${course.places[i+1].travel || 10}" data-block-field="travelNext" data-index="${i}">분</label>` : `${esc(p.transport || course.conditions.transport)} 이동 · 약 ${Number(course.places[i+1].travel) || 0}분 · ${course.places[i+1].travelActual ? '조회 거리 ' : '추정 거리 '}${Number.isFinite(course.places[i+1].travelDistance) ? course.places[i+1].travelDistance + 'm' : '미확인'}`}${!editable ? routeLinks(p, course.places[i+1]) : ''}</div>` : ''}`).join('');
+    <div class="block-body"><figure>${photo(p)}<figcaption>${p.photoUrl ? '장소 제공 사진 · 로딩 실패 시 예시 이미지' : '예시 이미지 · 실제 장소 사진 아님'}</figcaption></figure><div><p>${esc(p.category)} · ${esc(p.address || p.region)}${p.manual ? " · 직접 입력" : ""}</p>${editable ? btn("manual-place", "블록 수정", "", "outline", `data-index="${i}"`) : ""}${editable ? `<div class="form-grid"><label class="field">체류 시간 (분)<input type="number" min="5" max="${stayLimit(p)}" data-block-field="stay" data-index="${i}" value="${Number(p.stay) || 40}"></label><label class="field">예상 비용 (원)<input type="number" min="0" max="1000000" data-block-field="cost" data-index="${i}" value="${Number(p.cost) || 0}"></label></div><label class="field">메모<textarea maxlength="1000" data-block-field="note" data-index="${i}" placeholder="예약 시간, 하고 싶은 일 등">${esc(p.note || '')}</textarea></label>` : `<p>체류 ${Number(p.stay) || 0}분 · 1인 예상 ${won(p.cost)}</p>${p.note ? `<p class="block-note">${esc(p.note)}</p>` : ''}`}</div></div></article>${i < course.places.length - 1 ? `<div class="transport-block">↓ ${editable ? `<select aria-label="${i+1}번 구간 이동수단" data-block-field="transport" data-index="${i}">${['도보','자동차','대중교통'].map(m => `<option ${m === (p.transport || course.conditions.transport) ? 'selected' : ''}>${m}</option>`).join('')}</select><label>예상 <input aria-label="${i+1}번 구간 이동 시간" type="number" min="0" max="600" value="${course.places[i+1].travel ?? 10}" data-block-field="travelNext" data-index="${i}">분</label>` : `${esc(p.transport || course.conditions.transport)} 이동 · 약 ${Number(course.places[i+1].travel) || 0}분 · ${course.places[i+1].travelActual ? '조회 거리 ' : '추정 거리 '}${Number.isFinite(course.places[i+1].travelDistance) ? course.places[i+1].travelDistance + 'm' : '미확인'}`}${!editable ? routeLinks(p, course.places[i+1]) : ''}</div>` : ''}`).join('');
 }
 function sharedPage(course) {
   return `${greeting(esc(course.title), '공유된 코스와 방문 순서를 확인하세요.', 'SHARED COURSE', course.conditions.date || null)}
@@ -819,25 +829,97 @@ function downloadCalendar(course, date = course?.conditions.date) {
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   } catch (error) { toast(error.message); }
 }
+function editorPlaceLimit(course) {
+  return Math.min(144, Math.floor(course.conditions.duration / 5));
+}
+function manualPlaceDialog(index) {
+  const course = state.editor;
+  if (!course) return;
+  const place = index === undefined ? null : course.places[Number(index)];
+  if (index !== undefined && !place) return;
+  if (!place && course.places.length >= editorPlaceLimit(course)) return toast('이 일정에 추가할 수 있는 장소 수를 채웠어요.');
+  const title = place ? '일정 블록 수정' : '장소 직접 추가';
+  openDialog(title, `<form id="manual-place-form" ${place ? `data-index="${Number(index)}"` : ''}>
+    <div class="form-grid">
+      <label class="field wide">장소 이름<input name="name" required maxlength="120" value="${esc(place?.name || '')}"></label>
+      <label class="field wide">주소 (선택)<input name="address" maxlength="250" value="${esc(place?.address || '')}"></label>
+      ${place ? `<label class="field wide">방문 시각<input name="time" type="time" required value="${esc(place.time)}"></label>` : ''}
+      ${selectField('category', '장소 종류', ['기타', '식사', '카페', '문화', '산책'], place?.category || '기타')}
+      ${selectField('environment', '실내외', ['실내', '실외'], place?.environment || (course.conditions.environment === '실외' ? '실외' : '실내'))}
+      <label class="field">체류 시간 (분)<input name="stay" type="number" required min="5" max="720" value="${place?.stay ?? 30}"></label>
+      <label class="field">1인 예상 비용 (원)<input name="cost" type="number" required min="0" max="1000000" value="${place?.cost ?? 0}"></label>
+      ${index === '0' ? '' : `<label class="field wide">이전 장소에서 이동 시간 (분)<input name="travel" type="number" required min="0" max="600" value="${place?.travel ?? 10}"></label>`}
+      <label class="field wide">메모 (선택)<textarea name="note" maxlength="1000">${esc(place?.note || '')}</textarea></label>
+    </div>
+    <p class="form-note">${place ? '방문 시각을 바꾸면 이전 구간의 이동 시간이 맞춰지고 이후 일정이 다시 계산돼요. 이름이나 주소를 바꾼 장소는 새 위치가 확인될 때까지 지도 핀에서 제외돼요.' : '직접 입력한 장소에는 지도 핀이 자동으로 생성되지 않아요.'} 변경사항을 저장해 주세요.</p>
+    <p class="form-error" role="alert"></p>
+  </form>`, `<button class="btn primary" type="submit" form="manual-place-form">${place ? '장소 정보 반영' : '일정에 추가'}</button>`);
+}
+function applyManualPlace(form) {
+  const course = state.editor;
+  if (!course) return;
+  const editing = form.dataset.index !== undefined;
+  const index = editing ? Number(form.dataset.index) : course.places.length;
+  const previous = editing ? course.places[index] : null;
+  if (editing ? !previous : index >= editorPlaceLimit(course)) return;
+  const fields = new FormData(form);
+  const name = fields.get('name').trim();
+  const address = fields.get('address').trim();
+  const category = fields.get('category');
+  const stay = Number(fields.get('stay'));
+  const error = form.querySelector('.form-error');
+  if (!name) { error.textContent = '장소 이름을 입력해 주세요.'; return; }
+  if (stay > stayLimit({ category })) { error.textContent = `${category} 장소의 체류 시간은 최대 ${stayLimit({ category })}분이에요.`; return; }
+  const changedLocation = !previous || name !== previous.name || address !== (previous.address || '');
+  const time = fields.get('time');
+  const changedTime = editing && time !== previous.time;
+  let travel = index ? Number(fields.get('travel')) : 0;
+  if (changedTime && index) {
+    const before = course.places[index - 1];
+    const previousEnd = (timeMinutes(before.time) + Number(before.stay)) % 1440;
+    travel = (timeMinutes(time) - previousEnd + 1440) % 1440;
+    if (travel > 600) { error.textContent = '이전 장소 일정이 끝난 뒤 10시간 이내의 방문 시각을 입력해 주세요.'; return; }
+  }
+  if (editing && index === 0 && (changedTime || changedLocation)) {
+    const departure = changedLocation ? 0 : departureTimeFor(course);
+    course.conditions.start = formatMinutes((timeMinutes(time) - departure + 1440) % 1440);
+  }
+  const place = changedLocation && !previous?.manual
+    ? { id: `manual-${crypto.randomUUID()}`, region: course.conditions.region, manual: true, transport: previous?.transport }
+    : { ...previous };
+  Object.assign(place, { name, address, category, stay, environment: fields.get('environment'), cost: Number(fields.get('cost')), travel, note: fields.get('note').trim(), stayFixed: true });
+  if (changedLocation || travel !== previous?.travel) Object.assign(place, { travelActual: false, travelDistance: null });
+  course.places[index] = place;
+  if (changedLocation && course.places[index + 1]) Object.assign(course.places[index + 1], { travelActual: false, travelDistance: null });
+  course.timingMode = 'fixed';
+  closeDialog();
+  render();
+  toast(editing ? '장소 정보를 반영했어요.' : '일정 끝에 장소를 추가했어요.');
+}
 function editorPage() {
   const c = state.editor;
   const available = state.places.filter(p => !c.places.some(q => q.id === p.id));
-  return greeting('우리의 하루를 편집해요.', '⠿ 핸들을 드래그하거나 화살표로 장소 순서를 바꾸세요. 저장해야 변경이 반영됩니다.', 'COURSE EDITOR') + `<div class="detail-actions">${btn('save-edit','변경사항 저장','','primary')}${btn('cancel-edit','취소','','outline')}</div><div class="editor-heading"><label class="field">코스 제목<input id="editor-title" maxlength="200" value="${esc(c.title)}"></label><label class="field">시작 시간<input id="editor-start" type="time" value="${esc(c.conditions.start)}"></label></div><div class="block-list">${blocks(c, true)}</div>${timeNotice(c)}<div class="block-add"><label class="field">검색 결과에서 장소 추가<select id="editor-place">${available.map(p => `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.category)}</option>`).join('')}</select></label>${btn('block-add','장소 추가','','outline', !available.length || c.places.length >= Math.floor(c.conditions.duration / 5) ? 'disabled' : '')}</div><p class="form-note">이동시간은 직접 수정하는 예상값입니다. 순서를 바꾼 구간은 기본 10분으로 초기화됩니다. 장소 수는 전체 시간과 예산에 맞춰 늘릴 수 있어요. 식사는 최대 90분이에요. 기존 공유 링크는 공유 시점의 코스를 유지합니다.</p>`;
+  const atLimit = c.places.length >= editorPlaceLimit(c);
+  const placeActions = `<div class="block-add">${available.length ? `<label class="field">검색 결과에서 장소 추가<select id="editor-place">${available.map(p => `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.category)}</option>`).join('')}</select></label>${btn('block-add', '검색 장소 추가', '', 'outline', atLimit ? 'disabled' : '')}` : ''}${btn('manual-place', '장소 직접 추가', '', 'outline', atLimit ? 'disabled' : '')}</div>`;
+  return greeting('우리의 하루를 편집해요.', '⠿ 핸들을 드래그하거나 화살표로 장소 순서를 바꾸세요. 저장해야 변경이 반영됩니다.', 'COURSE EDITOR') + `<div class="detail-actions">${btn('save-edit','변경사항 저장','','primary')}${btn('cancel-edit','취소','','outline')}</div><div class="editor-heading"><label class="field">코스 제목<input id="editor-title" maxlength="200" value="${esc(c.title)}"></label><label class="field">시작 시간<input id="editor-start" type="time" value="${esc(c.conditions.start)}"></label></div><div class="block-list">${blocks(c, true)}</div>${timeNotice(c)}${placeActions}<p class="form-note">이동시간은 직접 수정하는 예상값입니다. 순서를 바꾼 구간은 기본 10분으로 초기화됩니다. 장소 수는 전체 시간과 예산에 맞춰 늘릴 수 있어요. 식사는 최대 90분이에요. 기존 공유 링크는 공유 시점의 코스를 유지합니다.</p>`;
 }
 function moveBlock(from, to) {
   if (!state.editor || to < 0 || to >= state.editor.places.length || from === to) return;
   const [p] = state.editor.places.splice(from, 1); state.editor.places.splice(to, 0, p);
   state.editor.places.forEach((p, i) => { p.travel = i ? 10 : 0; p.travelActual = false; p.travelDistance = null; }); render();
 }
+const timeMinutes = time => time.split(':').reduce((h, m) => Number(h) * 60 + Number(m));
+const formatMinutes = minute => `${String(Math.floor(minute / 60) % 24).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
 function updateSchedule(c) {
-  let minute = c.conditions.start.split(':').reduce((h, m) => Number(h) * 60 + Number(m)); const start = minute;
+  const start = timeMinutes(c.conditions.start);
+  let minute = start;
   minute += departureTimeFor(c);
   for (const [i, p] of c.places.entries()) {
     if (i) minute += Number(p.travel) || 0;
-    p.time = `${String(Math.floor(minute / 60) % 24).padStart(2,'0')}:${String(minute % 60).padStart(2,'0')}`;
+    p.time = formatMinutes(minute);
     minute += Number(p.stay) || 0;
   }
-  c.end = `${String(Math.floor(minute / 60) % 24).padStart(2,'0')}:${String(minute % 60).padStart(2,'0')}`;
+  c.end = formatMinutes(minute);
   c.minutes = minute - start; c.remainingMinutes = Math.max(0, c.conditions.duration - c.minutes); c.totalCost = c.places.reduce((n,p) => n + Number(p.cost || 0), 0);
 }
 async function saveEditor() {

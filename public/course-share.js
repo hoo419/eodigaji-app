@@ -1,7 +1,7 @@
 // 공개 코스 정보만 URL에 담습니다. 계정·프로필·인증 정보는 포함하지 않습니다.
 const courseKeys = ['id', 'title', 'conditions', 'places', 'totalCost', 'minutes', 'end', 'demo', 'estimated', 'concept', 'environmentLabel', 'label', 'revision', 'timingMode', 'remainingMinutes', 'departureMinutes', 'departurePlaceId', 'departureTransport'];
 const conditionKeys = ['region', 'purpose', 'partySize', 'budget', 'duration', 'start', 'date', 'environment', 'mood', 'transport', 'categories', 'excludedCategories', 'includeMeals', 'mealPlan', 'destinationName', 'destinationAddress', 'destinationUrl', 'destinationLat', 'destinationLng'];
-const placeKeys = ['id', 'name', 'region', 'category', 'cost', 'stay', 'stayWeight', 'stayFixed', 'environment', 'mood', 'x', 'y', 'lat', 'lng', 'photo', 'description', 'address', 'hours', 'demo', 'time', 'travel', 'travelDistance', 'travelBasis', 'travelActual', 'url', 'sourceUrl', 'photoUrl', 'note', 'transport'];
+const placeKeys = ['id', 'name', 'region', 'category', 'cost', 'stay', 'stayWeight', 'stayFixed', 'environment', 'mood', 'x', 'y', 'lat', 'lng', 'photo', 'description', 'address', 'hours', 'demo', 'time', 'travel', 'travelDistance', 'travelBasis', 'travelActual', 'url', 'sourceUrl', 'photoUrl', 'manual', 'note', 'transport'];
 const pick = (value, keys) => Object.fromEntries(keys.filter(k => value[k] !== undefined).map(k => [k, value[k]]));
 export function snapshot(course) {
   if (!course || !course.conditions || !Array.isArray(course.places) || course.places.length < 2 || course.places.length > 144) throw new Error('공유할 코스가 올바르지 않아요.');
@@ -18,6 +18,7 @@ export function snapshot(course) {
   if (typeof result.id !== 'string' || typeof result.title !== 'string' || typeof result.conditions.region !== 'string' || !result.places.every(p => typeof p.name === 'string' && typeof p.id === 'string' && /^\d{2}:\d{2}$/.test(p.time))) throw new Error('공유 코스 내용이 올바르지 않아요.');
   if (!/^[\w.-]{1,100}$/.test(result.id) || !result.places.every(p => /^[\w.-]{1,100}$/.test(p.id))) throw new Error('코스 ID가 올바르지 않아요.');
   for (const p of result.places) {
+    if (p.manual !== undefined && (p.manual !== true || !p.name.trim() || p.name.length > 120 || typeof p.address !== 'string' || p.address.length > 250)) throw new Error('직접 추가한 장소의 이름과 주소를 확인해 주세요.');
     if (!Number.isFinite(p.cost) || p.cost < 0 || p.cost > 1000000 || !Number.isFinite(p.stay) || p.stay < 5 || p.stay > (p.category === '식사' ? 90 : 720)) throw new Error('장소 비용과 체류 시간을 확인해 주세요.');
     if (p.transport && !['도보', '자동차', '대중교통'].includes(p.transport)) throw new Error('이동수단을 확인해 주세요.');
     if (p.photoUrl && !/^https:\/\//.test(p.photoUrl)) delete p.photoUrl;
