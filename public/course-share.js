@@ -1,6 +1,6 @@
 // 공개 코스 정보만 URL에 담습니다. 계정·프로필·인증 정보는 포함하지 않습니다.
 const courseKeys = ['id', 'title', 'conditions', 'places', 'totalCost', 'minutes', 'end', 'demo', 'estimated', 'concept', 'environmentLabel', 'label', 'revision', 'timingMode', 'remainingMinutes', 'departureMinutes', 'departurePlaceId', 'departureTransport'];
-const conditionKeys = ['region', 'purpose', 'partySize', 'budget', 'duration', 'start', 'date', 'environment', 'mood', 'transport', 'categories', 'excludedCategories', 'includeMeals', 'destinationName', 'destinationAddress', 'destinationUrl', 'destinationLat', 'destinationLng'];
+const conditionKeys = ['region', 'purpose', 'partySize', 'budget', 'duration', 'start', 'date', 'environment', 'mood', 'transport', 'categories', 'excludedCategories', 'includeMeals', 'mealPlan', 'destinationName', 'destinationAddress', 'destinationUrl', 'destinationLat', 'destinationLng'];
 const placeKeys = ['id', 'name', 'region', 'category', 'cost', 'stay', 'stayWeight', 'stayFixed', 'environment', 'mood', 'x', 'y', 'lat', 'lng', 'photo', 'description', 'address', 'hours', 'demo', 'time', 'travel', 'travelDistance', 'travelBasis', 'travelActual', 'url', 'sourceUrl', 'photoUrl', 'note', 'transport'];
 const pick = (value, keys) => Object.fromEntries(keys.filter(k => value[k] !== undefined).map(k => [k, value[k]]));
 export function snapshot(course) {

@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { loadEnvFile } from 'node:process';
-import { places, planCourse, recommendCourses, parseMessage, normalize, unsupportedTransport } from './lib/planner.mjs';
+import { places, planCourse, recommendCourses, parseMessage, normalize, unsupportedTransport, applyCategoryRules, requestedMealPlan, meetsMealPlan } from './lib/planner.mjs';
 import { createConnections } from './lib/connections.mjs';
 import { createSessions } from './lib/sessions.mjs';
 import { createRouting } from './lib/routing.mjs';
@@ -64,7 +64,7 @@ export function createApp({ env = process.env, connections = createConnections(e
     let recommendations;
     try { recommendations = recommendCourses(conditions, catalogue, { excludePlaceIds, origin, single: true }); }
     catch (e) {
-      if (e.code === 'NO_MATCHING_COURSE' && excludePlaceIds.length) e.message = '이전 장소를 제외하면 조건에 맞는 새 코스가 부족해요. 지역·예산·종류 조건을 바꿔 주세요.';
+      if (e.code === 'NO_MATCHING_COURSE' && excludePlaceIds.length && conditions.mealPlan === 'optional') e.message = '이전 장소를 제외하면 조건에 맞는 새 코스가 부족해요. 지역·예산·종류 조건을 바꿔 주세요.';
       throw e;
     }
     return { ...recommendations[0], recommendations, ...(status.places ? { availablePlaces: catalogue } : {}) };
@@ -179,29 +179,72 @@ export function createApp({ env = process.env, connections = createConnections(e
         const existing = currentCourse ? snapshot(currentCourse) : null;
         const retainedMemory = planningMemory(memory, existing);
         if (!Array.isArray(excludePlaceIds) || excludePlaceIds.length > 120 || excludePlaceIds.some(id => typeof id !== 'string' || id.length > 100)) throw new Error('이전 장소 정보를 확인해 주세요.');
-        const catalogue = existing ? (status.places ? await connections.searchPlaces(conditions.region || existing.conditions.region, { excludePlaceIds: [...new Set([...excludePlaceIds, ...retainedMemory.excludedPlaceIds])] }) : places.filter(p => !excludePlaceIds.includes(p.id) && !retainedMemory.excludedPlaceIds.includes(p.id))) : [];
+        const mealRequest = requestedMealPlan(message);
+        const neighborhood = message.trim().match(/^([가-힣]{1,20}[동읍면])\s*(?:에서|근처(?:로|에서)?)/)?.[1];
+        const prior = normalize(retainedMemory.pendingConditions || conditions);
+        const mealConditions = applyCategoryRules(message, prior);
+        const mealFlow = mealConditions.mealPlan !== 'optional' && (mealRequest || retainedMemory.pendingConditions?.mealPlan !== undefined || neighborhood || !existing || !meetsMealPlan(existing.places, mealConditions.mealPlan) || /(?:실내외|실내|실외|야외|예산|조건조정)/.test(message));
+        if (mealFlow) {
+          const budget = message.match(/(\d+(?:\.\d+)?)\s*만\s*원/);
+          const won = message.match(/(\d[\d,]*)\s*원/);
+          const hours = message.match(/(\d+(?:\.\d+)?)\s*시간/);
+          if (budget || won) mealConditions.budget = budget ? Number(budget[1]) * 10000 : Number(won[1].replaceAll(',', ''));
+          if (hours) mealConditions.duration = Number(hours[1]) * 60;
+          if (/실내외|환경.*전체|(?:조건|환경)\s*전체/.test(message)) mealConditions.environment = '전체';
+          else if (/실외|야외/.test(message)) mealConditions.environment = '실외';
+          else if (/실내/.test(message)) mealConditions.environment = '실내';
+        }
+        const sendMealPlan = async next => {
+          if (retainedMemory.lockedPlaceIds.length && !/유지.*(?:해제|취소)|고정.*(?:해제|풀|취소)|바꿔도/.test(message)) return json(res, 200, { course: null, memory: retainedMemory, message: '유지하기로 한 장소가 있어요. 유지 조건도 해제하고 식사 코스를 새로 만들까요?' });
+          try {
+            const course = await plan(next);
+            return json(res, 200, { course, conditions: course.conditions, memory: planningMemory({ ...retainedMemory, pendingConditions: null, destinationCandidates: [] }, course), provider: status.aiProvider, message: course.conditions.mealPlan.startsWith('pair') ? '식당 한 곳과 카페 한 곳으로 코스를 구성했어요.' : '식사를 포함한 코스를 구성했어요.' });
+          } catch (error) {
+            if (!['NO_MATCHING_COURSE', 'NO_PLACES_IN_REGION'].includes(error.code)) throw error;
+            return json(res, 200, { course: null, conditions: next, memory: { ...retainedMemory, pendingConditions: next, destinationCandidates: [] }, message: error.message });
+          }
+        };
+        if (mealFlow && neighborhood && status.places) {
+          return sendMealPlan(normalize({ ...mealConditions, region: neighborhood, destinationName: '', destinationAddress: '', destinationLat: null, destinationLng: null, destinationUrl: '' }));
+        }
+        if (mealFlow && status.ai && !retainedMemory.destinationCandidates.length && (existing || retainedMemory.pendingConditions) && !/근처|주변|인근|에서/.test(message)) {
+          return sendMealPlan(normalize(mealConditions));
+        }
+        const excluded = [...new Set([...excludePlaceIds, ...retainedMemory.excludedPlaceIds])];
+        const center = Number.isFinite(prior.destinationLat) && Number.isFinite(prior.destinationLng) ? { lat: prior.destinationLat, lng: prior.destinationLng } : undefined;
+        const searchOptions = { excludePlaceIds: excluded, ...(center ? { center } : {}) };
+        const catalogue = existing && !mealFlow ? (status.places ? await connections.searchPlaces(prior.region, searchOptions).catch(error => {
+          if (error.code === 'NO_PLACES_IN_REGION') return [];
+          throw error;
+        }) : places.filter(p => !excluded.includes(p.id))) : [];
         if (status.ai) {
           const today = new Date().toISOString().slice(0, 10); if (day !== today) { day = today; aiCount = 0; }
           if (aiCount >= Number(env.AI_DAILY_LIMIT || 100)) return json(res, 429, { error: '오늘 설정한 AI 요청 한도에 도달했어요. 내일 다시 이용해 주세요.' });
           if (!Array.isArray(history) || history.some(m => !m || !['user', 'assistant'].includes(m.role) || typeof m.text !== 'string')) throw new Error('대화 내역을 확인해 주세요.');
           aiCount++;
-          let reply = await connections.interpret(message, retainedMemory.pendingConditions || conditions, history, existing ? { course: existing, catalogue, memory: retainedMemory } : null);
+          let reply = await connections.interpret(message, mealFlow ? mealConditions : prior, history, existing && !mealFlow ? { course: existing, catalogue, memory: retainedMemory } : null);
           // Resolve named destinations online before asking the user for an address.
           const pending = retainedMemory.destinationCandidates || [];
-          const choice = message.trim().match(/^(\d+)(?:번)?(?:으로|이요|요)?[.!]?$/);
-          const selected = choice ? pending[Number(choice[1])-1] : pending.find(p => message.trim() === p.name);
-          const named = reply.destinationQuery;
+          const choice = message.trim().match(/^(\d+)(?:번)?(?:으로|이요|요)?[.!]?$/) || message.match(/(?:^|\s)(\d+)번/);
+          const selected = choice ? pending[Number(choice[1])-1] : pending.find(p => message.includes(p.name));
+          const named = neighborhood ? null : reply.destinationQuery;
           if (selected || (named && status.places && connections.resolveDestination)) {
             let found;
             try { found = selected ? [selected] : await connections.resolveDestination(named); }
             catch { return json(res,200,{course:null,memory:retainedMemory,message:'장소 검색에 연결하지 못했어요. 잠시 후 장소 이름으로 다시 요청해 주세요. 현재 코스는 유지했어요.'}); }
             if (!found.length) return json(res,200,{course:null,memory:retainedMemory,message:'온라인 장소 검색에서 일치하는 곳을 찾지 못했어요. 다른 표기나 지점명을 알려 주시겠어요?'});
-            if (found.length > 1) return json(res,200,{course:null,memory:{...retainedMemory,destinationCandidates:found},message:'동일하거나 비슷한 장소가 여러 곳이에요. 번호로 선택해 주세요.\n'+found.map((p,i)=>`${i+1}. ${p.name} · ${p.address}`).join('\n')});
+            if (found.length > 1) return json(res,200,{course:null,memory:{...retainedMemory,destinationCandidates:found,...(mealFlow ? {pendingConditions:mealConditions} : {})},message:'동일하거나 비슷한 장소가 여러 곳이에요. 번호로 선택해 주세요.\n'+found.map((p,i)=>`${i+1}. ${p.name} · ${p.address}`).join('\n')});
             const p = found[0];
-            const verified = normalize({...reply.conditions,region:p.region,destinationName:p.name,destinationAddress:p.address,destinationLat:p.lat,destinationLng:p.lng,destinationUrl:p.sourceUrl || ''});
+            const verified = normalize({...(mealFlow ? mealConditions : reply.conditions),region:p.region,destinationName:p.name,destinationAddress:p.address,destinationLat:p.lat,destinationLng:p.lng,destinationUrl:p.sourceUrl || ''});
+            if (mealFlow) return sendMealPlan(verified);
             return json(res,200,{course:null,conditions:verified,memory:{...retainedMemory,destinationCandidates:[],pendingConditions:verified},message:`${p.name} 위치를 찾았어요: ${p.address}. 이 장소를 기준으로 반경 3km 안의 주변 코스를 준비할게요.\n데이트와 여행 중 어떤 목적이고, 몇 시간·1인 예산 얼마로 구성할까요?`});
           }
           if (pending.length) return json(res,200,{course:null,memory:retainedMemory,message:'검색된 장소 중 번호나 정확한 이름을 골라 주세요.\n'+pending.map((p,i)=>`${i+1}. ${p.name} · ${p.address}`).join('\n')});
+          if (mealFlow) {
+            const region = reply.conditions?.region || mealConditions.region;
+            const destination = region === mealConditions.region ? {} : { destinationName: '', destinationAddress: '', destinationLat: null, destinationLng: null, destinationUrl: '' };
+            return sendMealPlan(normalize({ ...mealConditions, ...destination, region }));
+          }
           const confirmedDestination = retainedMemory.pendingConditions?.destinationName && /데이트|여행|시간|분|원|예산|추천|짜줘|만들|좋아|네|응/.test(message);
           if (confirmedDestination) {
             reply.conditions = normalize({...reply.conditions,region:retainedMemory.pendingConditions.region,...Object.fromEntries(['destinationName','destinationAddress','destinationUrl','destinationLat','destinationLng'].map(k=>[k,retainedMemory.pendingConditions[k]]))});
@@ -211,7 +254,7 @@ export function createApp({ env = process.env, connections = createConnections(e
             if (!status.places || typeof reply.searchQuery !== 'string') return json(res, 200, { course: null, memory: retainedMemory, message: '장소 이름 검색 연결을 확인해 주세요. 현재 코스는 그대로 유지했어요.' });
             if (aiCount >= Number(env.AI_DAILY_LIMIT || 100)) return json(res, 429, { error: '오늘 설정한 AI 요청 한도에 도달했어요.' });
             let found;
-            try { found = await connections.searchPlaces(conditions.region || existing.conditions.region, { query: reply.searchQuery, excludePlaceIds: retainedMemory.excludedPlaceIds }); }
+            try { found = await connections.searchPlaces(prior.region, { ...searchOptions, query: reply.searchQuery, excludePlaceIds: retainedMemory.excludedPlaceIds }); }
             catch { return json(res, 200, { course: null, memory: retainedMemory, message: '요청한 장소를 검색 결과에서 확인하지 못했어요. 정확한 상호명과 동네를 알려 주세요. 현재 코스는 유지했어요.' }); }
             if (!found.length) return json(res, 200, { course: null, memory: retainedMemory, message: '검색 결과가 없어요. 정확한 장소 이름을 알려 주세요.' });
             catalogue.push(...found); aiCount++;
@@ -229,6 +272,7 @@ export function createApp({ env = process.env, connections = createConnections(e
         // AI 키가 없을 때는 정규식 기반 체험 모드이며 실제 AI 응답이 아닙니다.
         const parsed = parseMessage(message, retainedMemory.pendingConditions || conditions);
         if (parsed.clarification) return json(res, 200, { message: parsed.clarification, course: null });
+        if (mealFlow) return sendMealPlan(parsed.conditions);
         if (existing) {
           const decision = localCourseDecision(message, existing, parsed.conditions, catalogue, retainedMemory);
           if (decision.operation === 'create') {

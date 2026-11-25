@@ -30,6 +30,60 @@ test('romantic dates default to cafes, explicit meal requests can include restau
   assert.ok(planCourse(meals, catalogue).places.some(p => p.category === '식사'));
 });
 
+test('meal dates require a restaurant, and an explicit restaurant–cafe pair has exactly two stops', () => {
+  const base = { region: '테스트동', duration: 360 };
+  const pair = applyCategoryRules('식사 후 데이트 코스로 식당과 카페 한 곳씩 추천해줘', base);
+  assert.deepEqual(planCourse(pair, catalogue).places.map(p => p.category), ['식사', '카페']);
+  const withoutRestaurants = catalogue.filter(p => p.category !== '식사');
+  assert.throws(() => recommendCourses(applyCategoryRules('식사데이트코스 추천', base), withoutRestaurants), { code: 'NO_MATCHING_COURSE' });
+  assert.equal(applyCategoryRules('식당은 빼줘', pair).mealPlan, 'optional');
+});
+
+test('live chat keeps the requested meal pair through neighborhood, destination, budget and environment changes', async t => {
+  const matchedOptions = [];
+  const existing = planCourse({ region: '테스트동', categories: ['산책'] }, catalogue);
+  const connections = {
+    ...memoryConnections(),
+    publicConfig: () => ({ ai: true, places: true, auth: true }),
+    searchPlaces: async (region, options) => {
+      matchedOptions.push({ region, ...options });
+      return catalogue.map(p => ({ ...p, region, cost: p.category === '식사' ? 20000 : p.category === '카페' ? 7000 : 0 }));
+    },
+    interpret: async (_, current) => ({ destinationQuery: '마포도서관', conditions: current, canPlan: false }),
+    resolveDestination: async () => Array.from({ length: 4 }, (_, i) => ({ name: '도서관 ' + (i + 1), address: '서울 마포구', region: '서울 마포구', lat: 37.5 + i / 100, lng: 127 })),
+  };
+  const server = createApp({ env: {}, connections });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = (path, body, cookie) => fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(body) });
+  const login = await post('/api/auth/login', { email: 'meal@example.com', password: '12345678' });
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const chat = async (message, previous = {}) => {
+    const response = await post('/api/chat', { message, conditions: previous.conditions || existing.conditions, memory: previous.memory, currentCourse: existing }, cookie);
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const initial = await chat('망원동에서 3시간 식사데이트코스 블록에 카페와 식당 한곳씩 넣고 추천 인당 2 만원');
+  assert.equal(initial.conditions.region, '망원동');
+  assert.equal(initial.conditions.duration, 180);
+  assert.equal(initial.conditions.budget, 20000);
+  assert.equal(initial.course, null);
+  assert.match(initial.message, /27,000원/);
+  const candidates = await chat('마포도서관근처로', initial);
+  assert.equal(candidates.memory.destinationCandidates.length, 4);
+  const selected = await chat('도서관 4번근처로', candidates);
+  assert.equal(selected.conditions.destinationName, '도서관 4');
+  const outdoor = await chat('실외로 조건변경', selected);
+  assert.equal(outdoor.course, null);
+  assert.match(outdoor.message, /실외 조건에서 식당/);
+  const renewed = await chat('환경조건 전체로변경 예산 3만원', outdoor);
+  assert.equal(renewed.conditions.region, '서울 마포구');
+  assert.deepEqual(renewed.course.places.map(p => p.category).sort(), ['식사', '카페']);
+  assert.equal(renewed.course.totalCost, 27000);
+  assert.deepEqual(matchedOptions.at(-1).center, { lat: 37.53, lng: 127 });
+});
+
 test('refresh excludes every earlier place and cannot silently fill with duplicates', () => {
   const first = recommendCourses({ region: '테스트동', categories: ['카페'] }, catalogue);
   const excludePlaceIds = first.flatMap(c => c.places.map(p => p.id));
