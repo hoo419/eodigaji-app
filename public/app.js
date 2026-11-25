@@ -110,7 +110,11 @@ function refreshLiveMap() {
   }
 }
 function acceptCourse(course) { if (state.planningMemory.courseId !== course.id) { state.planningMemory = { courseId: course.id, lockedPlaceIds: [], preferences: state.planningMemory.preferences || [], excludedPlaceIds: [] }; state.previousPlan = null; } if (!state.shared) state.seenPlaceIds = [...new Set([...state.seenPlaceIds, ...course.places.map(p => p.id)])].slice(-120); state.routeMode = null; state.routeDetails = null; state.routeBusy = false; state.courseChosen = false; state.mapExpanded = false; state.recommendations = [course]; state.course = course; state.conditions = course.conditions; if (course.availablePlaces) state.places = course.availablePlaces; }
-function greeting(title, sub, eyebrow = 'MAKE ROOM FOR A LITTLE ADVENTURE') { return `<section class="greeting"><div><span class="eyebrow">${eyebrow}</span><h1>${title}</h1><p>${sub}</p></div><span class="date">${icon('calendar')}${esc(today.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' }))}</span></section>`; }
+function greeting(title, sub, eyebrow = 'MAKE ROOM FOR A LITTLE ADVENTURE', date = dateISO) {
+  const day = new Date(date ? `${date}T00:00:00Z` : NaN);
+  const label = Number.isNaN(day.getTime()) ? '날짜 미정' : day.toLocaleDateString('ko-KR', { timeZone: 'UTC', month: 'long', day: 'numeric', weekday: 'long' });
+  return `<section class="greeting"><div><span class="eyebrow">${eyebrow}</span><h1>${title}</h1><p>${sub}</p></div><span class="date">${icon('calendar')}${esc(label)}</span></section>`;
+}
 function explore() {
   const c = state.conditions;
   return `${greeting('오늘, 어디로 떠나볼까요?', '취향이 닮은 장소부터 기분 좋은 동선까지. 우리의 하루를 찾아보세요.')}
@@ -493,6 +497,7 @@ async function copyShareLink() {
 async function share(course, button) {
   if (!course || !state.user || state.shared) return;
   const generation = accountGeneration;
+  let saved = false;
   button.disabled = true;
   try {
     if (!isSaved(course) || hasSavedChanges(course)) {
@@ -500,12 +505,19 @@ async function share(course, button) {
       await api('/api/saved', { course: compact });
       if (generation !== accountGeneration) return;
       state.saved = [compact, ...state.saved.filter(c => c.id !== compact.id)];
+      saved = true;
     }
     const { url } = await api('/api/shares', { courseId: course.id });
     if (generation !== accountGeneration) return;
+    if (saved) { render(); saved = false; }
     openDialog('코스 공유', `<p>링크를 받은 사람은 로그인 없이 코스를 보고 가능한 시간과 메모를 남길 수 있어요.</p><textarea class="share-text" readonly aria-label="공유할 코스 링크">${esc(url)}</textarea><p id="share-copy-status" role="status"></p>`, `<a class="btn outline" href="${esc(url)}" target="_blank" rel="noopener noreferrer">공유 코스 열기</a>${btn('copy-share-link', '링크 복사', '', 'primary')}`);
     await copyShareLink();
-  } catch (e) { if (generation === accountGeneration) toast(e.message); }
+  } catch (e) {
+    if (generation === accountGeneration) {
+      if (saved) render();
+      toast(e.message);
+    }
+  }
   finally { button.disabled = false; }
 }
 // 이벤트 위임: 화면을 다시 그려도 data-action 속성으로 버튼 동작을 한 곳에서 처리합니다.
@@ -755,7 +767,7 @@ function blocks(course, editable = false) {
     <div class="block-body"><figure>${photo(p)}<figcaption>${p.photoUrl ? '장소 제공 사진 · 로딩 실패 시 예시 이미지' : '예시 이미지 · 실제 장소 사진 아님'}</figcaption></figure><div><p>${esc(p.category)} · ${esc(p.address || p.region)}</p>${editable ? `<div class="form-grid"><label class="field">체류 시간 (분)<input type="number" min="5" max="${stayLimit(p)}" data-block-field="stay" data-index="${i}" value="${Number(p.stay) || 40}"></label><label class="field">예상 비용 (원)<input type="number" min="0" max="1000000" data-block-field="cost" data-index="${i}" value="${Number(p.cost) || 0}"></label></div><label class="field">메모<textarea maxlength="1000" data-block-field="note" data-index="${i}" placeholder="예약 시간, 하고 싶은 일 등">${esc(p.note || '')}</textarea></label>` : `<p>체류 ${Number(p.stay) || 0}분 · 1인 예상 ${won(p.cost)}</p>${p.note ? `<p class="block-note">${esc(p.note)}</p>` : ''}`}</div></div></article>${i < course.places.length - 1 ? `<div class="transport-block">↓ ${editable ? `<select aria-label="${i+1}번 구간 이동수단" data-block-field="transport" data-index="${i}">${['도보','자동차','대중교통'].map(m => `<option ${m === (p.transport || course.conditions.transport) ? 'selected' : ''}>${m}</option>`).join('')}</select><label>예상 <input aria-label="${i+1}번 구간 이동 시간" type="number" min="0" max="600" value="${course.places[i+1].travel || 10}" data-block-field="travelNext" data-index="${i}">분</label>` : `${esc(p.transport || course.conditions.transport)} 이동 · 약 ${Number(course.places[i+1].travel) || 0}분 · ${course.places[i+1].travelActual ? '조회 거리 ' : '추정 거리 '}${Number.isFinite(course.places[i+1].travelDistance) ? course.places[i+1].travelDistance + 'm' : '미확인'}`}${!editable ? routeLinks(p, course.places[i+1]) : ''}</div>` : ''}`).join('');
 }
 function sharedPage(course) {
-  return `${greeting(esc(course.title), '공유된 코스와 방문 순서를 확인하세요.', 'SHARED COURSE')}
+  return `${greeting(esc(course.title), '공유된 코스와 방문 순서를 확인하세요.', 'SHARED COURSE', course.conditions.date || null)}
     <div class="shared-notice">공유 시점에 저장된 코스</div><p>${esc(course.conditions.date || '날짜 미정')} · ${esc(course.conditions.region)} · 예상 ${won(course.totalCost)}</p>
     ${groupSummary(course)}${btn('calendar', '캘린더에 추가', 'calendar', 'outline')}
     ${state.shareId ? `<section class="availability-panel" aria-label="가능한 시간">

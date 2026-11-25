@@ -46,7 +46,7 @@ test('Supabase REST error_code distinguishes login and email confirmation failur
 test('real place data preserves coordinates and marks estimates', async () => {
   const api = createConnections({ KAKAO_REST_API_KEY: 'test' }, async url => {
     const category = new URL(url).searchParams.get('query');
-    return new Response(JSON.stringify({ documents: [{ id: category, place_name: '실제 장소', x: '127.04', y: '37.54', road_address_name: '서울 성동구', category_name: '음식점', place_url: 'http://place.map.kakao.com/1' }] }));
+    return new Response(JSON.stringify({ documents: [{ id: category, place_name: '실제 장소', x: '127.04', y: '37.54', address_name: '서울 성동구 성수동1가 10', road_address_name: '서울 성동구 연무장길 10', category_name: '음식점', place_url: 'http://place.map.kakao.com/1' }] }));
   });
   const places = await api.searchPlaces('성수');
   assert.ok(places.length); assert.equal(places[0].lat, 37.54); assert.equal(places[0].lng, 127.04);
@@ -57,12 +57,22 @@ test('regional searches preserve the requested city without adding Seoul', async
   const queries = [];
   const api = createConnections({ KAKAO_REST_API_KEY: 'test' }, async url => {
     const query = new URL(url).searchParams.get('query'); queries.push(query);
-    return new Response(JSON.stringify({ documents: [{ id: query, place_name: '지역 장소', x: '129.16', y: '35.16' }] }));
+    return new Response(JSON.stringify({ documents: [{ id: query, place_name: '지역 장소', x: '129.16', y: '35.16', address_name: '부산 해운대구 우동 10' }] }));
   });
   const places = await api.searchPlaces('부산 해운대');
   assert.equal(queries.length, 4);
   assert.ok(queries.every(query => query.startsWith('부산 해운대 ') && !query.includes('서울')));
+  assert.equal(places.length, 4);
   assert.ok(places.every(place => place.region === '부산 해운대'));
+});
+test('regional recommendations exclude places outside the requested neighborhood even if the name contains it', async () => {
+  const api = createConnections({ KAKAO_REST_API_KEY: 'test' }, async () => new Response(JSON.stringify({ documents: [
+    { id: '1', place_name: '연남 카페', address_name: '서울 마포구 연남동 10', x: '126.9', y: '37.5', category_group_code: 'CE7' },
+    { id: '2', place_name: '연남 다른 지점', address_name: '서울 서대문구 홍은동 10', x: '126.9', y: '37.5', category_group_code: 'CE7' },
+  ] })));
+  assert.deepEqual((await api.searchPlaces('연남')).map(place => place.id), ['kakao-1']);
+  assert.deepEqual((await api.searchPlaces('연남', { query: '연남 카페' })).map(place => place.id), ['kakao-1']);
+  await assert.rejects(api.searchPlaces('부산 해운대'), { code: 'NO_PLACES_IN_REGION' });
 });
 test('Gemini uses header authentication and validates generated conditions', async () => {
   let observed;

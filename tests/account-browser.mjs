@@ -13,7 +13,7 @@ const post = (path, body, cookie) => fetch(base + path, { method: 'POST', header
 const login = await post('/api/auth/login', { email: 'browser@example.com', password: '12345678' });
 const cookie = login.headers.get('set-cookie').split(';')[0];
 await post('/api/profile', { profile: { name: '여행자' } }, cookie);
-const course = planCourse({ region: '성수' });
+const course = planCourse({ region: '성수', date: '2026-11-11' });
 await post('/api/saved', { course }, cookie);
 const browser = await chromium.launch({ headless: true, channel: 'msedge' });
 try {
@@ -64,6 +64,7 @@ try {
   await anonymous.route(/https:\/\/(?!127\.0\.0\.1)/, route => route.abort());
   const shared = await anonymous.newPage(); await shared.goto(shareUrl);
   await shared.getByText('공유 시점에 저장된 코스', { exact: true }).waitFor();
+  assert.match(await shared.locator('.greeting .date').innerText(), /11월 11일/);
   assert.equal(await shared.locator('[data-action=edit-course],[data-action=save-edit],[data-action=share]').count(), 0);
   assert.equal(await shared.locator('.course-block').count(), course.places.length);
   assert.equal(await shared.locator('script').count(), 2);
@@ -71,11 +72,21 @@ try {
   await shared.screenshot({ path: 'artifacts/shared-course-mobile.png', fullPage: true });
   await shared.locator('[data-action=home]').last().click(); await shared.locator('.login-gate').waitFor();
   await page.locator('dialog [data-action=close]').click();
+  await page.locator('[data-action=nav][data-tab=explore]').click();
+  await page.getByRole('button', { name: '조건 변경', exact: true }).click();
+  await page.locator('[name=region]').fill('연남');
+  await page.getByRole('button', { name: '이 조건으로 코스 찾기' }).click();
+  await page.getByRole('button', { name: '이 코스 선택' }).click();
+  await page.getByRole('button', { name: '코스 저장', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'URL 복사', exact: true }).click();
+  await page.getByRole('heading', { name: '코스 공유' }).waitFor();
+  await page.locator('dialog [data-action=close]').click();
+  await page.getByRole('button', { name: '♥ 저장됨', exact: true }).waitFor();
   await page.locator('[data-action=logout]').first().click(); await page.locator('.login-gate').waitFor();
   await page.locator('dialog[open] #auth-form').waitFor(); await page.locator('[name=email]').fill('browser@example.com'); await page.locator('[name=password]').fill('12345678'); await page.locator('button[form=auth-form]').click();
   await page.locator('.shell').waitFor(); await page.locator('[data-action=nav][data-tab=saved]').click();
   await page.getByRole('heading', { name: '직접 편집한 데이트 코스' }).waitFor();
-  await page.getByRole('button', { name: '코스 수정', exact: true }).click();
+  await page.locator('.saved-course-card').filter({ has: page.getByRole('heading', { name: '직접 편집한 데이트 코스' }) }).getByRole('button', { name: '코스 수정', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
   await page.screenshot({ path: 'artifacts/course-editor-mobile.png', fullPage: true });

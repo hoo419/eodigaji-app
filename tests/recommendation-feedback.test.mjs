@@ -56,7 +56,7 @@ test('place search caches a larger pool so refresh can obtain new real place can
   let requests = 0;
   const api = createConnections({ KAKAO_REST_API_KEY: 'test' }, async url => {
     requests++; const q = new URL(url).searchParams.get('query');
-    return new Response(JSON.stringify({ documents: Array.from({ length: 15 }, (_, i) => ({ id: `${q}-${i}`, place_name: q + i, x: '127', y: '37.5' })) }));
+    return new Response(JSON.stringify({ documents: Array.from({ length: 15 }, (_, i) => ({ id: `${q}-${i}`, place_name: q + i, address_name: '서울 테스트구 테스트동 10', x: '127', y: '37.5' })) }));
   });
   const a = await api.searchPlaces('테스트동');
   const b = await api.searchPlaces('테스트동', { excludePlaceIds: a.slice(0, 12).map(p => p.id) });
